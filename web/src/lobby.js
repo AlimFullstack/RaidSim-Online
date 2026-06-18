@@ -236,6 +236,10 @@ export class Lobby {
     });
   }
 
+  formatShopCost(cost) {
+    return cost <= 0 ? 'Бесплатно' : `${cost} ₽`;
+  }
+
   renderShop() {
     if (!this.el.shopList || !this.profile) return;
     const rubles = this.profile.rubles;
@@ -246,8 +250,11 @@ export class Lobby {
       if (selectedItem) {
         const afford = rubles >= selectedItem.cost;
         this.el.shopHint.classList.add('shop-hint-bar--active');
+        const buyLabel = selectedItem.cost <= 0
+          ? 'нажми ещё раз, чтобы забрать бесплатно'
+          : `нажми ещё раз, чтобы купить за ${selectedItem.cost} ₽`;
         this.el.shopHint.innerHTML = afford
-          ? `<strong>${selectedItem.name}</strong> выбран — <span class="shop-hint-buy">нажми ещё раз, чтобы купить за ${selectedItem.cost} ₽</span>`
+          ? `<strong>${selectedItem.name}</strong> выбран — <span class="shop-hint-buy">${buyLabel}</span>`
           : `<strong>${selectedItem.name}</strong> выбран — <span class="shop-hint-warn">не хватает рублей (${rubles} / ${selectedItem.cost} ₽)</span>`;
       } else {
         this.el.shopHint.classList.remove('shop-hint-bar--active');
@@ -268,7 +275,7 @@ export class Lobby {
         <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
         <span class="shop-card-name">${item.name}</span>
         <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
-        <span class="shop-card-cost">${item.cost} ₽</span>
+        <span class="shop-card-cost">${this.formatShopCost(item.cost)}</span>
         ${isSelected ? '<span class="shop-card-action">КУПИТЬ</span>' : '<span class="shop-card-pick">Выбрать</span>'}
       </button>`;
     }).join('');
