@@ -12,12 +12,12 @@ export const COLORS = {
   cover: '#3d3428',
   extract: 'rgba(46, 204, 113, 0.25)',
   extractBorder: '#2ecc71',
-  player: '#c9a227',
+  player: '#8a9a7a',
   scav: '#b33a3a',
   boss: '#8e24aa',
-  bullet: '#f5e6a8',
+  bullet: '#c8d4bc',
   loot: '#5dade2',
-  lootRare: '#d4ac0d',
+  lootRare: '#7a9a6a',
 };
 
 export const NIGHT_COLORS = {

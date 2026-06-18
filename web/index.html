@@ -13,6 +13,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/lobby.css" />
   </head>
   <body>
     <canvas id="festive-bg" aria-hidden="true"></canvas>
@@ -78,7 +79,7 @@
 
     <div id="auth-screen" class="overlay hidden">
       <div class="overlay-glow"></div>
-      <div class="overlay-card auth-card">
+      <div class="overlay-card tac-panel auth-card">
         <p class="tag">RAIDSIM ONLINE</p>
         <h1><span class="title-main">Вход</span></h1>
         <p class="subtitle">Гость — без сохранения, прогресс пропадёт при обновлении страницы. Google — схрон и уровень в облаке.</p>
@@ -92,82 +93,85 @@
 
     <div id="lobby-screen" class="lobby-screen hidden">
       <div class="lobby-shell">
-        <header class="lobby-header">
+        <header class="lobby-top">
+          <div class="lobby-brand">RAIDSIM <span>ONLINE</span></div>
           <div class="lobby-profile">
             <div id="lobby-avatar" class="lobby-avatar">?</div>
-            <div>
+            <div class="lobby-profile-text">
               <div id="lobby-name" class="lobby-name">Оператор</div>
               <div id="lobby-level" class="lobby-level">Ур. 1</div>
               <div class="xp-track"><div id="lobby-xp-bar" class="xp-fill"></div></div>
+              <div id="lobby-stats-mini" class="lobby-stats-mini"></div>
             </div>
           </div>
           <div class="lobby-rubles-wrap">
+            <span class="rubles-label">РУБЛИ</span>
             <span id="lobby-rubles">0 ₽</span>
             <span id="guest-badge" class="guest-badge hidden">ГОСТЬ</span>
           </div>
           <button id="btn-logout" type="button" class="btn-logout">Выйти</button>
         </header>
 
-        <div class="lobby-body">
-          <aside class="lobby-aside lobby-aside-left">
-            <button id="btn-hideout" type="button" class="lobby-side-btn">УБЕЖИЩЕ</button>
-          </aside>
+        <nav class="lobby-tabs" role="tablist">
+          <button type="button" class="lobby-tab active" data-tab="raid">РЕЙД</button>
+          <button type="button" class="lobby-tab" data-tab="stash">СХРОН</button>
+          <button type="button" class="lobby-tab" data-tab="shop">ТОРГОВЕЦ</button>
+          <button type="button" class="lobby-tab" data-tab="hideout">УБЕЖИЩЕ</button>
+        </nav>
 
-          <main class="lobby-center">
-            <canvas id="lobby-char" width="200" height="240"></canvas>
-            <p id="loadout-info" class="loadout-info">Стандартный выход</p>
-          </main>
+        <div class="lobby-grid">
+          <section class="operator-panel tac-panel">
+            <h2 class="panel-title">ОПЕРАТОР</h2>
+            <div class="operator-body">
+              <div id="loadout-slots" class="loadout-slots loadout-slots-left"></div>
+              <div class="operator-char-wrap">
+                <canvas id="lobby-char" width="280" height="320"></canvas>
+              </div>
+              <div id="loadout-slots-right" class="loadout-slots loadout-slots-right"></div>
+            </div>
+          </section>
 
-          <aside class="lobby-aside lobby-aside-right">
-            <button id="btn-stash" type="button" class="lobby-side-btn">СХРОН</button>
-            <button id="btn-shop" type="button" class="lobby-side-btn">МАГАЗИН</button>
-          </aside>
+          <section class="tab-content">
+            <div id="tab-raid" class="tab-pane active">
+              <div id="quest-panel" class="quest-card tac-panel"></div>
+              <div class="raid-section">
+                <p class="section-label">ЛОКАЦИЯ</p>
+                <div id="map-list" class="map-card-grid"></div>
+              </div>
+              <div class="raid-section">
+                <p class="section-label">РЕЖИМ</p>
+                <div id="mode-list" class="mode-card-grid"></div>
+              </div>
+              <div id="raid-briefing" class="raid-briefing tac-panel"></div>
+              <button id="btn-play" type="button" class="btn primary deploy-btn">В РЕЙД</button>
+            </div>
+
+            <div id="tab-stash" class="tab-pane hidden">
+              <div class="tab-pane-head">
+                <h2 class="panel-title">СХРОН</h2>
+                <span id="stash-summary" class="tab-summary"></span>
+              </div>
+              <div id="stash-grid" class="stash-grid-inline"></div>
+            </div>
+
+            <div id="tab-shop" class="tab-pane hidden">
+              <div class="tab-pane-head">
+                <h2 class="panel-title">ТОРГОВЕЦ</h2>
+                <p class="tab-hint">Покупки применяются к следующему рейду</p>
+              </div>
+              <div id="shop-list" class="shop-grid"></div>
+            </div>
+
+            <div id="tab-hideout" class="tab-pane hidden">
+              <div class="tab-pane-head">
+                <h2 class="panel-title">УБЕЖИЩЕ</h2>
+              </div>
+              <div id="hideout-stats" class="hideout-panel tac-panel"></div>
+            </div>
+          </section>
         </div>
-
-        <div id="quest-panel" class="quest-panel"></div>
-
-        <div class="lobby-config">
-          <div class="lobby-modes">
-            <p class="modes-label">Карта</p>
-            <div id="map-list" class="mode-list"></div>
-          </div>
-          <div class="lobby-modes">
-            <p class="modes-label">Режим рейда</p>
-            <div id="mode-list" class="mode-list mode-list-3"></div>
-          </div>
-        </div>
-
-        <footer class="lobby-footer">
-          <button id="btn-play" type="button" class="btn primary lobby-play">В РЕЙД</button>
-        </footer>
       </div>
       <div id="lobby-toast" class="lobby-toast"></div>
-    </div>
-
-    <div id="stash-modal" class="modal hidden">
-      <div class="modal-card">
-        <h2>Схрон</h2>
-        <div id="stash-grid" class="stash-grid"></div>
-        <button id="stash-close" type="button" class="btn secondary">Закрыть</button>
-      </div>
-    </div>
-
-    <div id="hideout-modal" class="modal hidden">
-      <div class="modal-card">
-        <h2>Убежище</h2>
-        <div id="hideout-stats" class="hideout-stats"></div>
-        <button type="button" id="btn-stash-from-hideout" class="btn secondary">Схрон</button>
-        <button id="hideout-close" type="button" class="btn secondary">Закрыть</button>
-      </div>
-    </div>
-
-    <div id="shop-modal" class="modal hidden">
-      <div class="modal-card">
-        <h2>Магазин</h2>
-        <p class="modal-hint">Покупки применяются к следующему рейду</p>
-        <div id="shop-list" class="shop-list"></div>
-        <button id="shop-close" type="button" class="btn secondary">Закрыть</button>
-      </div>
     </div>
 
     <div id="overlay" class="overlay hidden">

@@ -14,7 +14,7 @@ export function drawMinimap(ctx, game) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = 'rgba(10, 12, 8, 0.85)';
-  ctx.strokeStyle = 'rgba(201, 162, 39, 0.5)';
+  ctx.strokeStyle = 'rgba(138, 154, 122, 0.5)';
   ctx.lineWidth = 1;
   ctx.fillRect(x0, y0, size, size);
   ctx.strokeRect(x0, y0, size, size);
@@ -48,13 +48,13 @@ export function drawMinimap(ctx, game) {
   }
 
   if (game.player && !game.player.dead) {
-    ctx.fillStyle = '#c9a227';
+    ctx.fillStyle = '#8a9a7a';
     ctx.beginPath();
     ctx.arc(tx(game.player.x), ty(game.player.y), 3, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.fillStyle = 'rgba(201, 162, 39, 0.8)';
+  ctx.fillStyle = 'rgba(138, 154, 122, 0.8)';
   ctx.beginPath();
   ctx.arc(tx(map.spawnPlayer.x), ty(map.spawnPlayer.y), 2, 0, Math.PI * 2);
   ctx.fill();

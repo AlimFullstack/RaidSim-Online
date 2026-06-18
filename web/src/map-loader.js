@@ -49,7 +49,27 @@ export async function loadMap(mapId = 'factory') {
 
 export function getMapList() {
   return [
-    { id: 'factory', name: 'Завод 4×4', theme: 'default' },
-    { id: 'night', name: 'Ночной двор', theme: 'night' },
+    {
+      id: 'factory',
+      name: 'Завод 4×4',
+      theme: 'default',
+      desc: 'Открытая площадка с укрытиями и лут-точками',
+      threat: 'Средняя',
+      scavCount: 5,
+      timeLabel: 'День',
+    },
+    {
+      id: 'night',
+      name: 'Ночной двор',
+      theme: 'night',
+      desc: 'Темнота снижает обзор, больше Scav',
+      threat: 'Высокая',
+      scavCount: 6,
+      timeLabel: 'Ночь',
+    },
   ];
+}
+
+export function getMapById(mapId) {
+  return getMapList().find((m) => m.id === mapId) || getMapList()[0];
 }

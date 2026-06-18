@@ -1,6 +1,19 @@
-import { xpToLevel, xpForNextLevel, RAID_MODES, SHOP_ITEMS, buyShopItem, sellStashItem, applyRaidResult } from './profile.js';
-import { getMapList } from './map-loader.js';
-import { pickRandomQuest } from './quests.js';
+import {
+  xpToLevel,
+  xpForNextLevel,
+  RAID_MODES,
+  SHOP_ITEMS,
+  buyShopItem,
+  sellStashItem,
+  applyRaidResult,
+  getSurvivalRate,
+} from './profile.js';
+import { getMapList, getMapById } from './map-loader.js';
+import { pickRandomQuest, QUEST_POOL } from './quests.js';
+import { getWeapon } from './weapons.js';
+
+const SHOP_ICONS = { medkit: '💊', ammo: '🔫', armor: '🛡' };
+const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
 
 export class Lobby {
   constructor(auth, storage, callbacks) {
@@ -11,25 +24,30 @@ export class Lobby {
     this.profile = null;
     this.selectedMode = 'standard';
     this.selectedMap = 'factory';
+    this.activeTab = 'raid';
 
     this.el = {
       auth: document.getElementById('auth-screen'),
       lobby: document.getElementById('lobby-screen'),
-      stashModal: document.getElementById('stash-modal'),
-      shopModal: document.getElementById('shop-modal'),
       avatar: document.getElementById('lobby-avatar'),
       name: document.getElementById('lobby-name'),
       level: document.getElementById('lobby-level'),
       xpBar: document.getElementById('lobby-xp-bar'),
+      statsMini: document.getElementById('lobby-stats-mini'),
       rubles: document.getElementById('lobby-rubles'),
       guestBadge: document.getElementById('guest-badge'),
       modeList: document.getElementById('mode-list'),
       mapList: document.getElementById('map-list'),
       questPanel: document.getElementById('quest-panel'),
+      briefing: document.getElementById('raid-briefing'),
       stashGrid: document.getElementById('stash-grid'),
+      stashSummary: document.getElementById('stash-summary'),
       shopList: document.getElementById('shop-list'),
-      loadoutInfo: document.getElementById('loadout-info'),
+      hideoutStats: document.getElementById('hideout-stats'),
+      slotsLeft: document.getElementById('loadout-slots'),
+      slotsRight: document.getElementById('loadout-slots-right'),
       charCanvas: document.getElementById('lobby-char'),
+      deployBtn: document.getElementById('btn-play'),
     };
 
     this.bindEvents();
@@ -49,44 +67,34 @@ export class Lobby {
     return r;
   }
 
-  renderMaps() {
-    if (!this.el.mapList) return;
-    this.el.mapList.innerHTML = getMapList()
-      .map(
-        (m) => `
-      <button type="button" class="mode-btn ${m.id === this.selectedMap ? 'active' : ''}" data-map="${m.id}">
-        <span class="mode-name">${m.name}</span>
-        <span class="mode-desc">${m.theme === 'night' ? 'Ночь' : 'День'}</span>
-      </button>`
-      )
-      .join('');
-    this.el.mapList.querySelectorAll('[data-map]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.selectedMap = btn.dataset.map;
-        this.renderMaps();
-      });
-    });
+  uiClick() {
+    this.callbacks.unlockAudio?.();
+    this.audio?.play('uiClick');
   }
 
   bindEvents() {
-    const uiClick = async () => {
-      await this.callbacks.unlockAudio?.();
-      this.audio?.play('uiClick');
-    };
-    document.getElementById('btn-guest')?.addEventListener('click', () => { uiClick(); this.enterGuest(); });
-    document.getElementById('btn-google')?.addEventListener('click', () => { uiClick(); this.enterGoogle(); });
-    document.getElementById('btn-play')?.addEventListener('click', () => { uiClick(); this.play(); });
-    document.getElementById('btn-stash')?.addEventListener('click', () => { uiClick(); this.openStash(); });
-    document.getElementById('btn-stash-from-hideout')?.addEventListener('click', () => {
-      document.getElementById('hideout-modal')?.classList.add('hidden');
-      this.openStash();
+    const uiClick = () => this.uiClick();
+
+    document.getElementById('btn-guest')?.addEventListener('click', () => {
+      uiClick();
+      this.enterGuest();
     });
-    document.getElementById('btn-hideout')?.addEventListener('click', () => this.openHideout());
-    document.getElementById('btn-shop')?.addEventListener('click', () => this.openShop());
+    document.getElementById('btn-google')?.addEventListener('click', () => {
+      uiClick();
+      this.enterGoogle();
+    });
+    document.getElementById('btn-play')?.addEventListener('click', () => {
+      uiClick();
+      this.play();
+    });
     document.getElementById('btn-logout')?.addEventListener('click', () => this.logout());
-    document.getElementById('stash-close')?.addEventListener('click', () => this.closeModals());
-    document.getElementById('hideout-close')?.addEventListener('click', () => this.closeModals());
-    document.getElementById('shop-close')?.addEventListener('click', () => this.closeModals());
+
+    document.querySelectorAll('.lobby-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        uiClick();
+        this.switchTab(tab.dataset.tab);
+      });
+    });
 
     if (!this.auth.isConfigured()) {
       const hint = document.getElementById('firebase-hint');
@@ -96,22 +104,82 @@ export class Lobby {
     }
   }
 
+  switchTab(tabId) {
+    this.activeTab = tabId;
+    document.querySelectorAll('.lobby-tab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.tab === tabId);
+    });
+    document.querySelectorAll('.tab-pane').forEach((pane) => {
+      const id = pane.id.replace('tab-', '');
+      pane.classList.toggle('hidden', id !== tabId);
+      pane.classList.toggle('active', id === tabId);
+    });
+    if (tabId === 'stash') this.renderStash();
+    if (tabId === 'hideout') this.renderHideout();
+    if (tabId === 'shop') this.renderShop();
+  }
+
+  formatDuration(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  renderMaps() {
+    if (!this.el.mapList) return;
+    this.el.mapList.innerHTML = getMapList()
+      .map((m) => {
+        const thumbClass = m.theme === 'night' ? 'map-thumb--night' : 'map-thumb--factory';
+        const active = m.id === this.selectedMap ? 'active' : '';
+        return `
+      <button type="button" class="map-card ${active}" data-map="${m.id}">
+        <div class="map-thumb ${thumbClass}">
+          <span class="map-card-check">✓</span>
+        </div>
+        <div class="map-card-body">
+          <span class="map-card-name">${m.name}</span>
+          <span class="map-card-meta">${m.timeLabel} · ${m.threat}</span>
+        </div>
+      </button>`;
+      })
+      .join('');
+
+    this.el.mapList.querySelectorAll('[data-map]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.uiClick();
+        this.selectedMap = btn.dataset.map;
+        this.renderMaps();
+        this.renderBriefing();
+        this.updateDeployBtn();
+      });
+    });
+  }
+
   renderModes() {
     if (!this.el.modeList) return;
     this.el.modeList.innerHTML = Object.values(RAID_MODES)
-      .map(
-        (m) => `
-      <button type="button" class="mode-btn ${m.id === this.selectedMode ? 'active' : ''}" data-mode="${m.id}">
-        <span class="mode-name">${m.name}</span>
-        <span class="mode-desc">${m.desc}</span>
-      </button>`
-      )
+      .map((m) => {
+        const active = m.id === this.selectedMode ? 'active' : '';
+        const bossClass = m.id === 'boss' ? 'mode-card--boss' : '';
+        return `
+      <button type="button" class="mode-card ${active} ${bossClass}" data-mode="${m.id}">
+        <span class="mode-card-icon">${MODE_ICONS[m.id] || '⏱'}</span>
+        <div class="mode-card-body">
+          <span class="mode-card-name">${m.name}${m.id === 'boss' ? ' <small>БОСС</small>' : ''}</span>
+          <span class="mode-card-meta">${this.formatDuration(m.duration)} · ${m.desc}</span>
+        </div>
+        <span class="mode-card-check">✓</span>
+      </button>`;
+      })
       .join('');
 
-    this.el.modeList.querySelectorAll('.mode-btn').forEach((btn) => {
+    this.el.modeList.querySelectorAll('[data-mode]').forEach((btn) => {
       btn.addEventListener('click', () => {
+        this.uiClick();
         this.selectedMode = btn.dataset.mode;
         this.renderModes();
+        this.renderBriefing();
+        this.updateDeployBtn();
       });
     });
   }
@@ -120,14 +188,17 @@ export class Lobby {
     if (!this.el.shopList) return;
     this.el.shopList.innerHTML = SHOP_ITEMS.map(
       (item) => `
-      <button type="button" class="shop-item" data-shop="${item.id}">
-        <span>${item.name}</span>
-        <span class="shop-cost">${item.cost} ₽</span>
+      <button type="button" class="shop-card" data-shop="${item.id}">
+        <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
+        <span class="shop-card-name">${item.name}</span>
+        <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
+        <span class="shop-card-cost">${item.cost} ₽</span>
       </button>`
     ).join('');
 
-    this.el.shopList.querySelectorAll('.shop-item').forEach((btn) => {
+    this.el.shopList.querySelectorAll('.shop-card').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        this.uiClick();
         const r = buyShopItem(this.profile, btn.dataset.shop);
         if (!r.ok) {
           this.flash(r.msg);
@@ -136,9 +207,15 @@ export class Lobby {
         this.profile = r.profile;
         await this.persistProfile(r.msg);
         this.render();
-        this.renderShop();
       });
     });
+  }
+
+  shopEffectDesc(item) {
+    if (item.loadoutKey === 'extraMedkits') return '+1 аптечка к рейду';
+    if (item.loadoutKey === 'extraAmmo') return `+${item.amount} патронов`;
+    if (item.loadoutKey === 'startArmor') return `+${item.amount} брони на старт`;
+    return '';
   }
 
   async enterGuest() {
@@ -155,7 +232,10 @@ export class Lobby {
       await this.auth.signInGoogle();
       this.profile = await this.storage.load();
       if (!this.profile.quests?.active) {
-        this.profile.quests = { active: pickRandomQuest(this.profile.quests?.completed || []), completed: this.profile.quests?.completed || [] };
+        this.profile.quests = {
+          active: pickRandomQuest(this.profile.quests?.completed || []),
+          completed: this.profile.quests?.completed || [],
+        };
         await this.persistProfile(null);
       }
       this.showLobby();
@@ -174,13 +254,13 @@ export class Lobby {
   showAuth() {
     this.el.auth?.classList.remove('hidden');
     this.el.lobby?.classList.add('hidden');
-    this.closeModals();
   }
 
   showLobby() {
     this.el.auth?.classList.add('hidden');
     this.el.lobby?.classList.remove('hidden');
     document.getElementById('overlay')?.classList.add('hidden');
+    this.switchTab('raid');
     this.render();
   }
 
@@ -214,49 +294,26 @@ export class Lobby {
     this.callbacks.onPlay(this.selectedMode, this.profile.loadout, this.selectedMap);
   }
 
-  openHideout() {
-    const el = document.getElementById('hideout-stats');
-    if (!el || !this.profile) return;
-    const s = this.profile.stats;
-    const stashCount = this.profile.stash?.items?.length || 0;
-    el.innerHTML = `
-      <p>Рейдов: <b>${s.raids}</b> · Экстрактов: <b>${s.extracts}</b> · Убийств: <b>${s.kills}</b></p>
-      <p>Лут всего: <b>${s.totalLootValue}₽</b> · Схрон: <b>${stashCount}/24</b></p>
-      <p>Убежище ур. <b>${this.profile.hideout?.level || 1}</b></p>
-      ${this.profile.isGuest ? '<p class="guest-warn">Гость — прогресс не сохранится при F5</p>' : '<p class="save-ok">Прогресс в облаке</p>'}
-    `;
-    document.getElementById('hideout-modal')?.classList.remove('hidden');
-  }
-
-  openStash() {
-    this.renderStash();
-    this.el.stashModal?.classList.remove('hidden');
-  }
-
-  openShop() {
-    this.render();
-    this.el.shopModal?.classList.remove('hidden');
-  }
-
-  closeModals() {
-    this.el.stashModal?.classList.add('hidden');
-    this.el.shopModal?.classList.add('hidden');
-    document.getElementById('hideout-modal')?.classList.add('hidden');
-  }
-
   renderStash() {
     if (!this.el.stashGrid) return;
     const items = this.profile?.stash?.items || [];
+    const totalValue = items.reduce((s, i) => s + (i.value || 0), 0);
+
+    if (this.el.stashSummary) {
+      this.el.stashSummary.textContent = `${items.length}/24 · ${totalValue} ₽`;
+    }
+
     if (!items.length) {
       this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. Вынеси лут с рейда.</p>';
       return;
     }
+
     this.el.stashGrid.innerHTML = items
       .map(
         (item, i) => `
-      <div class="stash-item">
-        <span>${item.name}</span>
-        <span>${item.value || 0} ₽</span>
+      <div class="stash-cell">
+        <span class="stash-cell-name">${item.name}</span>
+        <span class="stash-cell-value">${item.value || 0} ₽</span>
         <button type="button" class="sell-btn" data-idx="${i}">Продать</button>
       </div>`
       )
@@ -264,6 +321,7 @@ export class Lobby {
 
     this.el.stashGrid.querySelectorAll('.sell-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
+        this.uiClick();
         const r = sellStashItem(this.profile, Number(btn.dataset.idx));
         if (!r.ok) return;
         this.profile = r.profile;
@@ -274,6 +332,151 @@ export class Lobby {
     });
   }
 
+  renderHideout() {
+    const el = this.el.hideoutStats;
+    if (!el || !this.profile) return;
+    const s = this.profile.stats;
+    const stashCount = this.profile.stash?.items?.length || 0;
+    const survival = getSurvivalRate(this.profile);
+
+    el.innerHTML = `
+      <div class="hideout-stat-grid">
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${s.raids}</span>
+          <span class="hideout-stat-label">РЕЙДОВ</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${s.extracts}</span>
+          <span class="hideout-stat-label">ЭКСТРАКТОВ</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${survival}%</span>
+          <span class="hideout-stat-label">ВЫЖИВАНИЕ</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${s.kills}</span>
+          <span class="hideout-stat-label">УБИЙСТВ</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${s.totalLootValue}₽</span>
+          <span class="hideout-stat-label">ЛУТ ВСЕГО</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${stashCount}/24</span>
+          <span class="hideout-stat-label">СХРОН</span>
+        </div>
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${this.profile.hideout?.level || 1}</span>
+          <span class="hideout-stat-label">УБЕЖИЩЕ</span>
+        </div>
+      </div>
+      ${this.profile.isGuest ? '<p class="guest-warn">Гость — прогресс не сохранится при F5</p>' : '<p class="save-ok">Прогресс в облаке</p>'}
+    `;
+  }
+
+  renderOperatorSlots() {
+    const ld = this.profile?.loadout || {};
+    const weapon = getWeapon(ld.weapon || 'pm');
+    const stashCount = this.profile?.stash?.items?.length || 0;
+
+    const slot = (icon, label, value, filled) => `
+      <div class="equip-slot ${filled ? 'filled' : ''}" title="${label}: ${value}">
+        <span class="slot-icon">${icon}</span>
+        <span class="slot-label">${label}</span>
+        <span class="slot-value">${value}</span>
+      </div>`;
+
+    if (this.el.slotsLeft) {
+      this.el.slotsLeft.innerHTML = [
+        slot('🔫', 'ОРУЖИЕ', weapon.name, true),
+        slot('🛡', 'БРОНЯ', ld.startArmor ? `${ld.startArmor} HP` : '—', !!ld.startArmor),
+        slot('💊', 'АПТЕЧКИ', ld.extraMedkits ? `+${ld.extraMedkits}` : '—', !!ld.extraMedkits),
+      ].join('');
+    }
+
+    if (this.el.slotsRight) {
+      this.el.slotsRight.innerHTML = [
+        slot('🔋', 'ПАТРОНЫ', ld.extraAmmo ? `+${ld.extraAmmo}` : '—', !!ld.extraAmmo),
+        slot('🎒', 'РЮКЗАК', '6 слотов', true),
+        slot('📦', 'СХРОН', `${stashCount}/24`, stashCount > 0),
+      ].join('');
+    }
+  }
+
+  renderQuestCard() {
+    if (!this.el.questPanel) return;
+    const q = this.profile?.quests?.active;
+    if (!q) {
+      this.el.questPanel.innerHTML = '<p class="section-label">ЗАДАНИЕ</p><p class="quest-desc">Нет активного задания</p>';
+      return;
+    }
+
+    const def = QUEST_POOL.find((d) => d.id === q.id);
+    const reward = def?.reward;
+    const rewardText = reward ? `+${reward.rubles}₽ · +${reward.xp} XP` : '';
+
+    this.el.questPanel.innerHTML = `
+      <div class="quest-header">
+        <div>
+          <p class="section-label">ЗАДАНИЕ</p>
+          <div class="quest-title">${q.title}</div>
+        </div>
+        <span class="quest-reward">${rewardText}</span>
+      </div>
+      <p class="quest-desc">${q.desc}</p>
+      <div class="quest-progress"><div class="quest-progress-fill" style="width:0%"></div></div>
+    `;
+  }
+
+  renderBriefing() {
+    if (!this.el.briefing || !this.profile) return;
+    const map = getMapById(this.selectedMap);
+    const mode = RAID_MODES[this.selectedMode];
+    const ld = this.profile.loadout || {};
+    const weapon = getWeapon(ld.weapon || 'pm');
+
+    const equipParts = [weapon.name];
+    if (ld.extraMedkits) equipParts.push(`+${ld.extraMedkits} аптечки`);
+    if (ld.extraAmmo) equipParts.push(`+${ld.extraAmmo} патронов`);
+    if (ld.startArmor) equipParts.push(`броня ${ld.startArmor}`);
+
+    const threat =
+      this.selectedMode === 'boss'
+        ? 'Босс + Scav'
+        : `Scav × ${map.scavCount || 5}`;
+
+    this.el.briefing.innerHTML = `
+      <div class="briefing-title">БРИФИНГ РЕЙДА</div>
+      <div class="briefing-row">
+        <span class="briefing-label">Карта</span>
+        <span class="briefing-value">${map.name} · ${map.timeLabel}</span>
+      </div>
+      <div class="briefing-row">
+        <span class="briefing-label">Режим</span>
+        <span class="briefing-value">${mode.name} · ${this.formatDuration(mode.duration)}</span>
+      </div>
+      <div class="briefing-row">
+        <span class="briefing-label">Угроза</span>
+        <span class="briefing-value">${threat}</span>
+      </div>
+      <div class="briefing-row">
+        <span class="briefing-label">Описание</span>
+        <span class="briefing-value">${map.desc}</span>
+      </div>
+      <div class="briefing-row">
+        <span class="briefing-label">Экипировка</span>
+        <span class="briefing-value">${equipParts.join(', ')}</span>
+      </div>
+    `;
+  }
+
+  updateDeployBtn() {
+    if (!this.el.deployBtn) return;
+    const map = getMapById(this.selectedMap);
+    const mode = RAID_MODES[this.selectedMode];
+    this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">${map.name} · ${this.formatDuration(mode.duration)}</span>`;
+  }
+
   render() {
     if (!this.profile) return;
     const p = this.profile;
@@ -281,6 +484,7 @@ export class Lobby {
     const nextXp = xpForNextLevel(level);
     const prevXp = xpForNextLevel(level - 1);
     const pct = ((p.xp - prevXp) / (nextXp - prevXp)) * 100;
+    const survival = getSurvivalRate(p);
 
     if (this.el.avatar) {
       if (p.photoURL) {
@@ -294,22 +498,19 @@ export class Lobby {
     if (this.el.xpBar) this.el.xpBar.style.width = `${Math.min(100, pct)}%`;
     if (this.el.rubles) this.el.rubles.textContent = `${p.rubles} ₽`;
     if (this.el.guestBadge) this.el.guestBadge.classList.toggle('hidden', !p.isGuest);
-
-    const q = p.quests?.active;
-    if (this.el.questPanel) {
-      this.el.questPanel.innerHTML = q
-        ? `<span class="quest-label">КВЕСТ</span> ${q.title}<br><small>${q.desc}</small>`
-        : '<span class="quest-label">КВЕСТ</span> Нет активного';
+    if (this.el.statsMini) {
+      this.el.statsMini.textContent = `Рейдов: ${p.stats.raids} · Выжил: ${survival}% · Убийств: ${p.stats.kills}`;
     }
 
-    const ld = p.loadout || {};
-    const parts = [];
-    if (ld.extraMedkits) parts.push(`Аптечки: +${ld.extraMedkits}`);
-    if (ld.extraAmmo) parts.push(`Патроны: +${ld.extraAmmo}`);
-    if (ld.startArmor) parts.push(`Броня: ${ld.startArmor}`);
-    if (this.el.loadoutInfo) {
-      this.el.loadoutInfo.textContent = parts.length ? parts.join(' · ') : 'Стандартный выход';
-    }
+    this.renderQuestCard();
+    this.renderOperatorSlots();
+    this.renderBriefing();
+    this.updateDeployBtn();
+    this.renderMaps();
+    this.renderModes();
+
+    if (this.activeTab === 'stash') this.renderStash();
+    if (this.activeTab === 'hideout') this.renderHideout();
 
     this.drawCharacter();
   }
@@ -322,30 +523,54 @@ export class Lobby {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    const grd = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, 70);
-    grd.addColorStop(0, 'rgba(74, 90, 66, 0.2)');
+    const grd = ctx.createRadialGradient(w / 2, h * 0.45, 10, w / 2, h * 0.45, 120);
+    grd.addColorStop(0, 'rgba(74, 90, 66, 0.25)');
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.beginPath();
-    ctx.ellipse(w / 2, h * 0.72, 28, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(w / 2, h * 0.78, 42, 14, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#5a6a52';
+    const bodyY = h * 0.42;
+    ctx.fillStyle = '#2a3228';
+    ctx.fillRect(w / 2 - 28, bodyY + 20, 56, 70);
+
+    ctx.fillStyle = '#3a4438';
     ctx.beginPath();
-    ctx.arc(w / 2, h * 0.55, 22, 0, Math.PI * 2);
+    ctx.moveTo(w / 2 - 32, bodyY + 22);
+    ctx.lineTo(w / 2 + 32, bodyY + 22);
+    ctx.lineTo(w / 2 + 24, bodyY + 88);
+    ctx.lineTo(w / 2 - 24, bodyY + 88);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#4a5a42';
+    ctx.beginPath();
+    ctx.arc(w / 2, bodyY, 22, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#1a1e18';
-    ctx.fillRect(w / 2 + 8, h * 0.55 - 4, 20, 8);
+    ctx.fillRect(w / 2 - 20, bodyY - 8, 40, 12);
+
+    ctx.fillStyle = '#2a3228';
+    ctx.fillRect(w / 2 - 38, bodyY + 30, 14, 50);
+    ctx.fillRect(w / 2 + 24, bodyY + 30, 14, 50);
+
+    ctx.fillStyle = '#1a1e18';
+    ctx.fillRect(w / 2 + 30, bodyY + 48, 36, 8);
 
     if (this.profile?.loadout?.startArmor) {
-      ctx.strokeStyle = '#4a6a7a';
+      ctx.strokeStyle = '#5a7a8a';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(w / 2, h * 0.55, 28, 0, Math.PI * 2);
+      ctx.moveTo(w / 2 - 30, bodyY + 24);
+      ctx.lineTo(w / 2 + 30, bodyY + 24);
+      ctx.lineTo(w / 2 + 22, bodyY + 82);
+      ctx.lineTo(w / 2 - 22, bodyY + 82);
+      ctx.closePath();
       ctx.stroke();
     }
   }

@@ -18,6 +18,12 @@ export function xpForNextLevel(level) {
   return level * level * 80;
 }
 
+export function getSurvivalRate(profile) {
+  const raids = profile.stats?.raids || 0;
+  if (!raids) return 0;
+  return Math.round((profile.stats.extracts / raids) * 100);
+}
+
 export function createDefaultProfile(overrides = {}) {
   return {
     displayName: 'Оператор',
