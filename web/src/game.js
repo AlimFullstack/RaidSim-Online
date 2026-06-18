@@ -11,6 +11,8 @@ import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, Ground
 import { RAID_MODES } from './profile.js';
 import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
+import { getMuzzleOffset } from './weapons.js';
+import { getMapTheme } from './map-atmosphere.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
 
@@ -255,13 +257,27 @@ export class Game {
       if (this.playerMoving) this.audio?.tickFootsteps(dt, p.isSprinting);
 
       if (shot) {
-        const bullets = Array.isArray(shot) ? shot : [shot];
+        const bullets = shot.bullets || (Array.isArray(shot) ? shot : [shot]);
         this.bullets.push(...bullets);
         this.audio?.play('shoot', { weapon: p.weaponId });
-        const mx = p.x + Math.cos(p.angle) * 22;
-        const my = p.y + Math.sin(p.angle) * 22;
-        this.fx.muzzleFlash(mx, my, p.angle);
+        const muzzle = getMuzzleOffset(p.weaponId);
+        const mx = p.x + Math.cos(p.angle) * muzzle.x;
+        const my = p.y + Math.sin(p.angle) * muzzle.x;
+        const flashColor = shot.muzzleColor || '#ffe08a';
+        const flashSize = p.weaponId === 'shotgun' ? 1.4 : p.weaponId === 'ak' ? 1.1 : 0.9;
+        this.fx.muzzleFlash(mx, my, p.angle, flashColor, flashSize);
+        if (shot.recoilKick) this.fx.kickCamera(shot.recoilKick, p.angle);
+        if (shot.shellEject) this.fx.shellCasing(p.x, p.y, p.angle);
         if (p.noiseLevel > 0.5) this.emitNoise(p.x, p.y, p.noiseLevel);
+      } else if (
+        combat &&
+        this.input.mouse.justDown &&
+        p.canShoot() &&
+        p.fireBlockedReason &&
+        this.emptyClickCooldown <= 0
+      ) {
+        this.setStatus(p.fireBlockedReason, 1.2, 'fail');
+        this.emptyClickCooldown = 0.4;
       } else if (
         combat &&
         this.input.mouse.down &&
@@ -563,8 +579,8 @@ export class Game {
     const mapH = this.activeMap.mapH;
     const viewW = this.canvas.width / this.scale;
     const viewH = this.canvas.height / this.scale;
-    this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2));
-    this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2));
+    this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2 + (this.fx.camKickX || 0)));
+    this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2 + (this.fx.camKickY || 0)));
     const sens = this.settings?.mouseSens ?? 1;
     this.input.updateWorld(this.camX, this.camY, this.scale);
     if (sens !== 1 && this.player) {
@@ -590,7 +606,7 @@ export class Game {
     const maxH = Math.min(window.innerHeight - 60, 900);
     this.canvas.width = Math.max(640, Math.floor(maxW));
     this.canvas.height = Math.max(480, Math.floor(maxH));
-    this.scale = 1;
+    this.scale = this.state === 'raid' ? 1.5 : 1;
     if (this.player) this.updateCamera();
   }
 
@@ -622,9 +638,10 @@ export class Game {
     for (const scav of this.scavs) scav.draw(ctx);
     if (this.playerCorpse) this.playerCorpse.draw(ctx);
     for (const gi of this.groundItems) gi.draw(ctx);
-    if (this.player && !this.player.dead) this.player.draw(ctx);
     for (const b of this.bullets) b.draw(ctx);
     this.fx.drawWorld(ctx);
+    this.fx.drawRaidFog(ctx, this);
+    if (this.player && !this.player.dead) this.player.draw(ctx);
     this.drawInteractHint(ctx);
 
     if (this.extracting && this.player) {
@@ -637,7 +654,11 @@ export class Game {
     drawMinimap(ctx, this);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.fx.drawScreen(ctx, this.canvas.width, this.canvas.height);
+    this.fx.drawScreen(ctx, this.canvas.width, this.canvas.height, {
+      raid: this.state === 'raid',
+      time: this.animTime,
+      fogTint: this.activeMap ? getMapTheme(this.activeMap.theme).fogTint : null,
+    });
     this.drawCrosshair(ctx);
   }
 
@@ -744,6 +765,18 @@ export function createUI() {
       document.getElementById('extract-bar').style.width = `${(p.extractProgress / EXTRACT_TIME) * 100}%`;
       document.getElementById('ammo').textContent = p.canShoot() ? `${p.ammo} / ${p.reserve}` : '—';
       document.getElementById('weapon-name').textContent = p.canShoot() ? p.weaponName || '—' : '—';
+      const weaponHint = document.getElementById('weapon-hint');
+      if (weaponHint) {
+        if (p.canShoot() && p.weaponId === 'pm') {
+          weaponHint.textContent = 'Полуавто · стой для выстрела';
+        } else if (p.canShoot() && p.semiAuto) {
+          weaponHint.textContent = 'Полуавто · клик';
+        } else if (p.canShoot()) {
+          weaponHint.textContent = 'Авто · R перезарядка';
+        } else {
+          weaponHint.textContent = 'Выбери слот с оружием';
+        }
+      }
       const hintEl = document.getElementById('active-slot-hint');
       if (hintEl) hintEl.textContent = p.getSlotActionHint();
       document.getElementById('inv-count').textContent = `${p.inventory.length}/${p.maxInv}`;

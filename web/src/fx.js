@@ -1,3 +1,5 @@
+import { getMapTheme } from './map-atmosphere.js';
+
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
 export class FestiveBackground {
@@ -179,6 +181,8 @@ export class GameFx {
     this.screenFlashColor = '#ff0000';
     this.vignette = 0;
     this.extractGlow = 0;
+    this.camKickX = 0;
+    this.camKickY = 0;
   }
 
   clear() {
@@ -189,6 +193,8 @@ export class GameFx {
     this.screenFlash = 0;
     this.vignette = 0;
     this.extractGlow = 0;
+    this.camKickX = 0;
+    this.camKickY = 0;
   }
 
   spawnParticles(x, y, opts = {}) {
@@ -221,9 +227,34 @@ export class GameFx {
     this.floats.push({ x, y, text, color, life: 1.4, vy: -40 });
   }
 
-  muzzleFlash(x, y, angle, color = '#ffe08a') {
-    this.muzzles.push({ x, y, angle, life: 0.08, color });
-    this.spawnParticles(x, y, { count: 4, color, speed: 80, life: 0.12, size: 2, spread: 0.5, angle });
+  muzzleFlash(x, y, angle, color = '#ffe08a', size = 1) {
+    this.muzzles.push({ x, y, angle, life: 0.1, color, size });
+    this.spawnParticles(x, y, {
+      count: Math.round(5 * size),
+      color,
+      speed: 120 * size,
+      life: 0.14,
+      size: 2 * size,
+      spread: 0.4,
+      angle,
+    });
+  }
+
+  kickCamera(strength, angle) {
+    this.camKickX += Math.cos(angle + Math.PI) * strength * 0.35;
+    this.camKickY += Math.sin(angle + Math.PI) * strength * 0.35;
+  }
+
+  shellCasing(x, y, angle) {
+    this.spawnParticles(x, y, {
+      count: 1,
+      color: '#d4af37',
+      speed: 90,
+      life: 0.35,
+      size: 2,
+      spread: 0.8,
+      angle: angle + Math.PI / 2,
+    });
   }
 
   hitSparks(x, y) {
@@ -339,6 +370,8 @@ export class GameFx {
     if (this.screenFlash > 0) this.screenFlash = Math.max(0, this.screenFlash - dt * 1.8);
     if (this.vignette > 0) this.vignette = Math.max(0, this.vignette - dt * 0.8);
     if (this.extractGlow > 0) this.extractGlow = Math.max(0, this.extractGlow - dt * 1.2);
+    this.camKickX *= Math.max(0, 1 - dt * 14);
+    this.camKickY *= Math.max(0, 1 - dt * 14);
   }
 
   drawWorld(ctx) {
@@ -356,14 +389,20 @@ export class GameFx {
       ctx.save();
       ctx.translate(m.x, m.y);
       ctx.rotate(m.angle);
-      ctx.globalAlpha = m.life / 0.08;
+      const s = m.size || 1;
+      ctx.globalAlpha = m.life / 0.1;
       ctx.fillStyle = m.color;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(18, -6);
-      ctx.lineTo(22, 0);
-      ctx.lineTo(18, 6);
+      ctx.lineTo(22 * s, -8 * s);
+      ctx.lineTo(28 * s, 0);
+      ctx.lineTo(22 * s, 8 * s);
       ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = (m.life / 0.1) * 0.7;
+      ctx.beginPath();
+      ctx.arc(6 * s, 0, 4 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -389,7 +428,74 @@ export class GameFx {
     ctx.globalAlpha = 1;
   }
 
-  drawScreen(ctx, w, h) {
+  drawRaidFog(ctx, game) {
+    const p = game.player;
+    if (!p || p.dead || game.state !== 'raid') return;
+
+    const theme = getMapTheme(game.activeMap?.theme);
+    const viewW = game.canvas.width / game.scale;
+    const viewH = game.canvas.height / game.scale;
+    const aim = p.angle;
+    const vision = theme.visionRadius;
+    const coneRange = theme.coneRange;
+    const coneAngle = theme.coneAngle;
+
+    ctx.save();
+    ctx.fillStyle = theme.fogColor;
+    ctx.fillRect(game.camX - 20, game.camY - 20, viewW + 40, viewH + 40);
+
+    ctx.globalCompositeOperation = 'destination-out';
+
+    const foot = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, vision);
+    foot.addColorStop(0, 'rgba(0,0,0,1)');
+    foot.addColorStop(0.35, 'rgba(0,0,0,0.92)');
+    foot.addColorStop(0.65, 'rgba(0,0,0,0.5)');
+    foot.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = foot;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, vision, 0, Math.PI * 2);
+    ctx.fill();
+
+    const coneGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, coneRange);
+    coneGrad.addColorStop(0, 'rgba(0,0,0,1)');
+    coneGrad.addColorStop(0.5, 'rgba(0,0,0,0.75)');
+    coneGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = coneGrad;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.arc(p.x, p.y, coneRange, aim - coneAngle, aim + coneAngle);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = theme.fogTint;
+    ctx.fillRect(game.camX - 20, game.camY - 20, viewW + 40, viewH + 40);
+    ctx.restore();
+  }
+
+  drawRaidVignette(ctx, w, h) {
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.04, w / 2, h / 2, Math.max(w, h) * 0.52);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.4, 'rgba(0,0,0,0.45)');
+    g.addColorStop(0.75, 'rgba(0,0,0,0.78)');
+    g.addColorStop(1, 'rgba(0,0,0,0.95)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  drawFilmGrain(ctx, w, h, time = 0) {
+    const count = Math.floor((w * h) / 900);
+    ctx.save();
+    for (let i = 0; i < count; i++) {
+      const x = (Math.sin(time * 17 + i * 1.7) * 0.5 + 0.5) * w;
+      const y = (Math.cos(time * 13 + i * 2.3) * 0.5 + 0.5) * h;
+      ctx.fillStyle = `rgba(255,255,255,${0.02 + (i % 5) * 0.008})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+    ctx.restore();
+  }
+
+  drawScreen(ctx, w, h, opts = {}) {
     if (this.screenFlash > 0) {
       ctx.fillStyle = this.screenFlashColor.includes('rgba') ? this.screenFlashColor : this.screenFlashColor;
       ctx.globalAlpha = this.screenFlash;
@@ -411,6 +517,17 @@ export class GameFx {
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
+    }
+
+    if (opts.raid) {
+      this.drawRaidVignette(ctx, w, h);
+      this.drawFilmGrain(ctx, w, h, opts.time || 0);
+      if (opts.fogTint) {
+        ctx.fillStyle = opts.fogTint;
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(0, 0, w, h);
+        ctx.globalAlpha = 1;
+      }
     }
   }
 }

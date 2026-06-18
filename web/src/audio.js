@@ -153,15 +153,18 @@ const SOUNDS = {
   shoot(ctx, dest, opts = {}) {
     const w = opts.weapon || 'pm';
     if (w === 'shotgun') {
-      noise(ctx, dest, 0.12, 0.55);
-      tone(ctx, dest, 90, 'square', 0.08, 0.4, 40);
+      noise(ctx, dest, 0.14, 0.65);
+      tone(ctx, dest, 70, 'square', 0.1, 0.45, 35);
+      tone(ctx, dest, 40, 'sine', 0.15, 0.3, 20, 0.02);
     } else if (w === 'ak') {
-      noise(ctx, dest, 0.05, 0.45);
-      tone(ctx, dest, 140, 'sawtooth', 0.06, 0.35, 70);
-      tone(ctx, dest, 280, 'square', 0.04, 0.15, 120);
+      noise(ctx, dest, 0.04, 0.5);
+      tone(ctx, dest, 160, 'sawtooth', 0.05, 0.38, 65);
+      tone(ctx, dest, 300, 'square', 0.035, 0.18, 110);
     } else {
-      noise(ctx, dest, 0.06, 0.5);
-      tone(ctx, dest, 180, 'square', 0.05, 0.35, 80);
+      noise(ctx, dest, 0.018, 0.75);
+      tone(ctx, dest, 420, 'square', 0.022, 0.55, 140);
+      tone(ctx, dest, 120, 'sine', 0.06, 0.28, 50, 0.008);
+      tone(ctx, dest, 60, 'triangle', 0.1, 0.15, 30, 0.015);
     }
   },
   shootEnemy(ctx, dest) {

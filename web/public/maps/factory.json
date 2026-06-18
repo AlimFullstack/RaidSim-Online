@@ -2,7 +2,7 @@
   "id": "factory",
   "name": "Завод 12×12",
   "worldScale": 3,
-  "theme": "default",
+  "theme": "factory",
   "walls": [
     { "x": 0, "y": 0, "w": 4, "h": 0.12, "m": 1 },
     { "x": 0, "y": 3.88, "w": 4, "h": 0.12, "m": 1 },

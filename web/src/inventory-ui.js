@@ -1,4 +1,5 @@
 import { GroundItem } from './entities.js';
+import { getWeapon } from './weapons.js';
 
 /** Иконка типа предмета для UI */
 export function itemIcon(item) {
@@ -16,7 +17,10 @@ export function itemIcon(item) {
 /** Подсказка действия для предмета в слоте */
 export function slotItemHint(item) {
   if (!item) return 'Пустой слот';
-  if (item.weapon) return `${item.name} — выбери, ЛКМ стрелять`;
+  if (item.weapon) {
+    const w = getWeapon(item.weapon);
+    return w.standToFire ? `${item.name} — стой, клик ЛКМ` : `${item.name} — клик ЛКМ`;
+  }
   if (item.heal) return `${item.name} — выбери, F лечиться`;
   if (item.grenade) return `${item.name} — выбери, G бросить`;
   if (item.smoke) return `${item.name} — выбери, V дым`;

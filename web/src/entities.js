@@ -12,13 +12,19 @@ import {
   generateScavLoot,
   getMapBounds,
 } from './map-core.js';
-import { getWeapon, calcSpread } from './weapons.js';
+import { getWeapon, calcSpread, getMuzzleOffset } from './weapons.js';
+import {
+  getMapTheme,
+  drawMapDecor,
+  drawThematicWalls,
+  drawMapAmbienceOverlay,
+} from './map-atmosphere.js';
 
 export class Input {
   constructor(canvas) {
     this.keys = new Set();
     this.justPressed = new Set();
-    this.mouse = { x: 0, y: 0, down: false, worldX: 0, worldY: 0 };
+    this.mouse = { x: 0, y: 0, down: false, justDown: false, worldX: 0, worldY: 0 };
     this.canvas = canvas;
 
     window.addEventListener('keydown', (e) => {
@@ -39,6 +45,7 @@ export class Input {
       this.mouse.screenY = this.mouse.y * this.mouse.displayScaleY;
     });
     canvas.addEventListener('mousedown', () => {
+      this.mouse.justDown = true;
       this.mouse.down = true;
     });
     window.addEventListener('mouseup', () => {
@@ -56,6 +63,7 @@ export class Input {
 
   endFrame() {
     this.justPressed.clear();
+    this.mouse.justDown = false;
   }
 
   updateWorld(camX, camY, scale) {
@@ -71,20 +79,24 @@ export class Input {
 }
 
 export class Bullet {
-  constructor(x, y, angle, owner, damage = 18, walls = [], maxRange = 9999, originX = x, originY = y) {
+  constructor(x, y, angle, owner, damage = 18, walls = [], maxRange = 9999, originX = x, originY = y, opts = {}) {
     this.x = x;
     this.y = y;
     this.ox = originX;
     this.oy = originY;
-    this.vx = Math.cos(angle) * 620;
-    this.vy = Math.sin(angle) * 620;
+    const speed = opts.speed || 620;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed;
+    this.angle = angle;
     this.owner = owner;
     this.damage = damage;
     this.dead = false;
-    this.life = 1.2;
-    this.r = 4;
+    this.life = 1.4;
+    this.r = opts.size || 3;
     this.walls = walls;
     this.maxRange = maxRange;
+    this.tracerColor = opts.tracerColor || COLORS.bullet;
+    this.isPellet = !!opts.isPellet;
   }
 
   update(dt) {
@@ -107,7 +119,20 @@ export class Bullet {
   }
 
   draw(ctx) {
-    ctx.fillStyle = COLORS.bullet;
+    const tail = 10 + this.r * 2;
+    const tx = this.x - Math.cos(this.angle) * tail;
+    const ty = this.y - Math.sin(this.angle) * tail;
+
+    ctx.strokeStyle = this.tracerColor;
+    ctx.lineWidth = this.isPellet ? 1.5 : 2.5;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(this.x, this.y);
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
@@ -128,27 +153,29 @@ export class LootPoint {
   draw(ctx) {
     if (this.searched) return;
     const t = Date.now() / 300;
-    const glow = this.tier === 'valuable' ? COLORS.lootRare : COLORS.loot;
+    const isRare = this.tier === 'valuable';
+    const glow = isRare ? '#6a8a5a' : '#4a7a9a';
 
-    ctx.globalAlpha = 0.2 + Math.sin(t) * 0.1;
+    ctx.globalAlpha = 0.15 + Math.sin(t) * 0.08;
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, this.r + 6, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, this.r + 10, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = glow;
-    ctx.globalAlpha = 0.5 + Math.sin(t) * 0.2;
+    ctx.fillStyle = isRare ? 'rgba(90, 120, 80, 0.7)' : 'rgba(60, 90, 120, 0.65)';
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.fillStyle = isRare ? '#a8c8a0' : '#8ec8ff';
+    ctx.globalAlpha = 0.7 + Math.sin(t) * 0.2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r - 8, 0, Math.PI * 2);
+    ctx.fill();
     ctx.globalAlpha = 1;
 
-    ctx.strokeStyle = glow;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    if (this.tier === 'valuable') {
+    if (isRare) {
       ctx.fillStyle = '#ffe08a';
       ctx.font = '10px JetBrains Mono';
       ctx.textAlign = 'center';
@@ -253,6 +280,8 @@ export class Player extends Entity {
     this.noiseLevel = 0;
     this.recoilHeat = 0;
     this.currentSpread = 0;
+    this.recoilAngle = 0;
+    this.fireBlockedReason = '';
   }
 
   initRaidInventory(weaponId, loadout = {}) {
@@ -280,7 +309,12 @@ export class Player extends Entity {
     const item = this.getSelectedItem();
     const n = this.selectedSlot + 1;
     if (!item) return `Слот ${n} пуст`;
-    if (item.weapon) return `Слот ${n}: ${item.name} · ЛКМ · R`;
+    if (item.weapon) {
+      const w = getWeapon(item.weapon);
+      return w.standToFire
+        ? `Слот ${n}: ${item.name} · стой · ЛКМ`
+        : `Слот ${n}: ${item.name} · ЛКМ`;
+    }
     if (item.heal) return `Слот ${n}: ${item.name} · F лечиться`;
     if (item.grenade) return `Слот ${n}: ${item.name} · G бросить`;
     if (item.smoke) return `Слот ${n}: ${item.name} · V дым`;
@@ -383,6 +417,8 @@ export class Player extends Entity {
     this.pellets = w.pellets;
     this.weaponRange = w.range;
     this.weaponDef = w;
+    this.semiAuto = !!w.semiAuto;
+    this.standToFire = !!w.standToFire;
   }
 
   getSpreadAngle() {
@@ -420,10 +456,12 @@ export class Player extends Entity {
     this.move(dx, dy, dt);
     this.noiseLevel = this.isSprinting ? 1 : this.isMoving ? 0.4 : 0;
 
-    this.recoilHeat = Math.max(0, this.recoilHeat - dt * 1.8);
+    this.recoilHeat = Math.max(0, this.recoilHeat - dt * (this.semiAuto ? 2.4 : 1.6));
+    this.recoilAngle = this.recoilAngle * Math.max(0, 1 - dt * 12);
     this.currentSpread = this.getSpreadAngle();
 
-    this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
+    const aimAngle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
+    this.angle = aimAngle + this.recoilAngle;
 
     for (let i = 0; i < this.maxInv; i++) {
       if (input.tapped(`Digit${i + 1}`)) this.selectSlot(i);
@@ -442,26 +480,61 @@ export class Player extends Entity {
 
     this.fireCooldown -= dt;
     if (input.tapped('KeyR') && this.canShoot() && this.ammo < this.magSize && this.reserve > 0) {
-      this.reloadTime = 1.4;
+      this.reloadTime = this.weaponDef?.reloadTime || 1.4;
       return null;
     }
 
-    if (combat && this.canShoot() && input.mouse.down && this.fireCooldown <= 0 && this.ammo > 0) {
+    const w = this.weaponDef || getWeapon(this.weaponId);
+    const trigger = w.semiAuto ? input.mouse.justDown : input.mouse.down;
+    this.fireBlockedReason = '';
+
+    if (combat && this.canShoot() && trigger && this.fireCooldown <= 0 && this.ammo > 0) {
+      if (w.standToFire && this.isMoving) {
+        this.fireBlockedReason = 'ПМ: остановись для выстрела';
+        return null;
+      }
+
       this.ammo -= 1;
-      this.fireCooldown = this.fireRate;
+      this.fireCooldown = w.fireRate;
       this.noiseLevel = 1;
-      this.recoilHeat = Math.min(1, this.recoilHeat + 0.35);
+      this.recoilHeat = Math.min(1, this.recoilHeat + (w.semiAuto ? 0.55 : 0.4));
+      const kick = (w.recoilKick || 6) * 0.0022;
+      this.recoilAngle += (Math.random() - 0.5) * kick * 2 - kick * 0.3;
+
       const spreadTotal = this.getSpreadAngle();
       const bullets = [];
-      const ox = this.x + Math.cos(this.angle) * 20;
-      const oy = this.y + Math.sin(this.angle) * 20;
-      for (let i = 0; i < this.pellets; i++) {
+      const muzzle = getMuzzleOffset(this.weaponId);
+      const ox = this.x + Math.cos(this.angle) * muzzle.x;
+      const oy = this.y + Math.sin(this.angle) * muzzle.x;
+      const bulletOpts = {
+        speed: w.bulletSpeed,
+        size: w.bulletSize,
+        tracerColor: w.tracerColor,
+        isPellet: w.pellets > 1,
+      };
+      for (let i = 0; i < w.pellets; i++) {
         const spread = (Math.random() - 0.5) * spreadTotal * 2;
         bullets.push(
-          new Bullet(ox, oy, this.angle + spread, 'player', this.weaponDamage, this.walls, this.weaponRange, ox, oy)
+          new Bullet(
+            ox,
+            oy,
+            this.angle + spread,
+            'player',
+            this.weaponDamage,
+            this.walls,
+            this.weaponRange,
+            ox,
+            oy,
+            bulletOpts
+          )
         );
       }
-      return bullets;
+      return {
+        bullets,
+        recoilKick: w.recoilKick || 6,
+        muzzleColor: w.muzzleColor,
+        shellEject: w.semiAuto,
+      };
     }
     return null;
   }
@@ -515,27 +588,79 @@ export class Player extends Entity {
     ctx.arc(0, 0, this.r, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#2c2418';
-    ctx.fillRect(8, -4, 18, 8);
+    this.drawWeaponModel(ctx);
 
     ctx.restore();
   }
 
+  drawWeaponModel(ctx) {
+    const id = this.weaponId;
+    if (id === 'pm') {
+      ctx.fillStyle = '#1a1510';
+      ctx.fillRect(6, -3, 14, 6);
+      ctx.fillStyle = '#3d3428';
+      ctx.fillRect(18, -2, 8, 4);
+      ctx.fillStyle = '#5a4a38';
+      ctx.fillRect(4, -1, 6, 2);
+    } else if (id === 'ak') {
+      ctx.fillStyle = '#2a2418';
+      ctx.fillRect(4, -4, 22, 8);
+      ctx.fillStyle = '#4a4030';
+      ctx.fillRect(22, -2, 14, 4);
+      ctx.fillStyle = '#6b5a40';
+      ctx.fillRect(8, -6, 8, 3);
+      ctx.fillStyle = '#8b7355';
+      ctx.fillRect(-2, -2, 8, 4);
+    } else if (id === 'shotgun') {
+      ctx.fillStyle = '#2c2418';
+      ctx.fillRect(2, -5, 20, 10);
+      ctx.fillStyle = '#4a4035';
+      ctx.fillRect(20, -3, 12, 6);
+      ctx.fillStyle = '#6b5d4d';
+      ctx.fillRect(0, -3, 8, 6);
+    } else {
+      ctx.fillStyle = '#2c2418';
+      ctx.fillRect(8, -4, 18, 8);
+    }
+  }
+
   drawSpreadCone(ctx) {
+    if (!this.canShoot()) return;
     const spread = this.currentSpread;
-    if (spread < 0.02) return;
+    if (spread < 0.005) return;
+
+    const maxRange = this.weaponRange > 0 && this.weaponRange < 9000 ? this.weaponRange : 420;
+    const range = Math.max(280, maxRange);
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.fillStyle = 'rgba(138, 154, 122, 0.1)';
-    ctx.strokeStyle = 'rgba(138, 154, 122, 0.25)';
-    ctx.lineWidth = 1;
+
+    const leftX = range * Math.cos(-spread);
+    const leftY = range * Math.sin(-spread);
+    const rightX = range * Math.cos(spread);
+    const rightY = range * Math.sin(spread);
+
+    ctx.fillStyle = 'rgba(138, 154, 122, 0.12)';
+    ctx.strokeStyle = 'rgba(138, 154, 122, 0.35)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.arc(0, 0, 90, -spread, spread);
+    ctx.lineTo(leftX, leftY);
+    ctx.arc(0, 0, range, -spread, spread);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(200, 220, 180, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(leftX, leftY);
+    ctx.moveTo(0, 0);
+    ctx.lineTo(rightX, rightY);
+    ctx.stroke();
+
     ctx.restore();
   }
 }
@@ -774,24 +899,26 @@ export class SmokeZone {
 }
 
 export function drawMap(ctx, time = 0, mapConfig) {
-  const colors = mapConfig?.theme === 'night' ? NIGHT_COLORS : COLORS;
+  const theme = getMapTheme(mapConfig?.theme);
   const walls = mapConfig?.walls || [];
   const extractZone = mapConfig?.extractZone;
   const mapW = mapConfig?.mapW || MAP_W;
   const mapH = mapConfig?.mapH || MAP_H;
   const gridW = mapConfig?.gridW || 40;
+  const isNight = mapConfig?.theme === 'night';
 
   const bg = ctx.createLinearGradient(0, 0, mapW, mapH);
-  bg.addColorStop(0, '#141a12');
-  bg.addColorStop(0.5, colors.floor);
-  bg.addColorStop(1, '#12180f');
+  bg.addColorStop(0, theme.floorAlt);
+  bg.addColorStop(0.45, theme.floor);
+  bg.addColorStop(1, theme.floorAlt);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, mapW, mapH);
 
-  ctx.strokeStyle = colors.floorGrid;
+  ctx.strokeStyle = theme.floorGrid;
   ctx.lineWidth = 1;
   const gridStep = mapW / gridW;
   for (let i = 0; i <= gridW; i++) {
+    ctx.globalAlpha = i % 3 === 0 ? 0.55 : 0.28;
     ctx.beginPath();
     ctx.moveTo(i * gridStep, 0);
     ctx.lineTo(i * gridStep, mapH);
@@ -801,54 +928,47 @@ export function drawMap(ctx, time = 0, mapConfig) {
     ctx.lineTo(mapW, i * gridStep);
     ctx.stroke();
   }
+  ctx.globalAlpha = 1;
 
-  for (const w of walls) {
-    const top = ctx.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
-    top.addColorStop(0, colors.wallTop);
-    top.addColorStop(0.3, colors.wall);
-    top.addColorStop(1, '#2e2820');
-    ctx.fillStyle = top;
-    ctx.fillRect(w.x, w.y, w.w, w.h);
-    ctx.strokeStyle = 'rgba(138, 154, 122, 0.12)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
+  drawMapDecor(ctx, mapConfig, time);
+  drawThematicWalls(ctx, walls, theme);
+
+  if (!extractZone) {
+    drawMapAmbienceOverlay(ctx, mapConfig, time);
+    return;
   }
 
-  if (!extractZone) return;
-
   const pulse = 0.5 + Math.sin(time * 2.5) * 0.2;
-  ctx.fillStyle = `rgba(46, 204, 113, ${0.15 + pulse * 0.15})`;
+  const extractFill = isNight ? `rgba(46, 120, 200, ${0.12 + pulse * 0.1})` : `rgba(180, 140, 40, ${0.14 + pulse * 0.12})`;
+  ctx.fillStyle = extractFill;
   ctx.fillRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
 
   const glow = ctx.createRadialGradient(
     extractZone.x + extractZone.w / 2,
     extractZone.y + extractZone.h / 2,
-    10,
+    8,
     extractZone.x + extractZone.w / 2,
     extractZone.y + extractZone.h / 2,
-    extractZone.w * 0.7
+    extractZone.w * 0.85
   );
-  glow.addColorStop(0, `rgba(138, 154, 122, ${0.08 + pulse * 0.06})`);
-  glow.addColorStop(1, 'rgba(46, 204, 113, 0)');
+  glow.addColorStop(0, isNight ? `rgba(100, 180, 255, ${0.1 + pulse * 0.08})` : `rgba(220, 180, 60, ${0.12 + pulse * 0.08})`);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = glow;
   ctx.fillRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
 
-  ctx.strokeStyle = colors.extractBorder;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([12, 8]);
+  ctx.strokeStyle = isNight ? '#3a8ac8' : theme.hazard;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 7]);
   ctx.strokeRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
   ctx.setLineDash([]);
 
-  ctx.shadowColor = '#2ecc71';
-  ctx.shadowBlur = 8 + pulse * 6;
-  ctx.fillStyle = '#a8f0c8';
-  ctx.font = 'bold 18px Oswald';
+  ctx.shadowColor = isNight ? '#4a9adc' : '#c9a227';
+  ctx.shadowBlur = 6 + pulse * 8;
+  ctx.fillStyle = isNight ? '#8ec8ff' : '#e8d080';
+  ctx.font = 'bold 16px Oswald';
   ctx.textAlign = 'center';
-  ctx.fillText('✦ ЭКСТРАКТ ✦', extractZone.x + extractZone.w / 2, extractZone.y + extractZone.h / 2 + 6);
+  ctx.fillText(isNight ? '◈ ЭКСТРАКТ ◈' : '✦ ЭКСТРАКТ ✦', extractZone.x + extractZone.w / 2, extractZone.y + extractZone.h / 2 + 5);
   ctx.shadowBlur = 0;
 
-  if (mapConfig?.theme === 'night') {
-    ctx.fillStyle = 'rgba(0,0,20,0.45)';
-    ctx.fillRect(0, 0, mapW, mapH);
-  }
+  drawMapAmbienceOverlay(ctx, mapConfig, time);
 }

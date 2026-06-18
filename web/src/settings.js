@@ -11,7 +11,7 @@ export const CONTROL_BINDINGS = [
   { keys: 'W A S D', action: 'Движение' },
   { keys: 'Shift', action: 'Бег' },
   { keys: 'Мышь', action: 'Прицеливание' },
-  { keys: 'ЛКМ', action: 'Стрельба (если выбран слот с оружием)' },
+  { keys: 'ЛКМ', action: 'Выстрел (ПМ — клик, стоя на месте)' },
   { keys: 'R', action: 'Перезарядка' },
   { keys: 'E', action: 'Поиск / лут (удерживать)' },
   { keys: 'Tab / I', action: 'Большой рюкзак (или кнопка РЮКЗАК)' },
