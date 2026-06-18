@@ -15,10 +15,11 @@ import {
 import { Input, Player, Scav, Bullet, LootPoint, drawMap } from './entities.js';
 
 export class Game {
-  constructor(canvas, ui) {
+  constructor(canvas, ui, confetti = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.ui = ui;
+    this.confetti = confetti;
     this.input = new Input(canvas);
     this.state = 'menu';
     this.scale = 1;
@@ -27,6 +28,7 @@ export class Game {
     this.statusMsg = '';
     this.statusTimer = 0;
     this.lastTime = 0;
+    this.animTime = 0;
     this.raidTimeLeft = RAID_DURATION;
     this.bullets = [];
     this.lootPoints = [];
@@ -194,6 +196,9 @@ export class Game {
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
+    if (type === 'extracted' && this.confetti) {
+      this.confetti.burst(150);
+    }
   }
 
   updateCamera() {
@@ -222,7 +227,7 @@ export class Game {
     if (this.state === 'menu') return;
 
     ctx.setTransform(this.scale, 0, 0, this.scale, -this.camX * this.scale, -this.camY * this.scale);
-    drawMap(ctx);
+    drawMap(ctx, this.animTime);
 
     for (const lp of this.lootPoints) lp.draw(ctx);
     for (const scav of this.scavs) if (!scav.dead) scav.draw(ctx);
@@ -244,6 +249,7 @@ export class Game {
   loop(ts) {
     const dt = Math.min(0.033, (ts - this.lastTime) / 1000 || 0);
     this.lastTime = ts;
+    this.animTime += dt;
     this.update(dt);
     this.draw();
     requestAnimationFrame((t) => this.loop(t));
@@ -273,12 +279,16 @@ export function createUI() {
     },
     showEnd(payload) {
       endScreen.classList.remove('hidden');
+      const card = endScreen.querySelector('.overlay-card');
+      card.classList.remove('win', 'lose', 'mia');
+      card.classList.add(payload.type === 'extracted' ? 'win' : payload.type === 'mia' ? 'mia' : 'lose');
+
       const tag = document.getElementById('end-tag');
       const title = document.getElementById('end-title');
       const desc = document.getElementById('end-desc');
       const lootEl = document.getElementById('end-loot');
 
-      tag.textContent = payload.type === 'extracted' ? 'SURVIVED' : payload.type === 'mia' ? 'MIA' : 'KIA';
+      tag.textContent = payload.type === 'extracted' ? '✦ SURVIVED ✦' : payload.type === 'mia' ? 'MIA' : 'KIA';
       title.textContent = payload.title;
       desc.textContent = payload.desc;
 
@@ -296,6 +306,8 @@ export function createUI() {
       if (!p) return;
 
       document.getElementById('timer').textContent = formatTime(Math.max(0, game.raidTimeLeft));
+      const timerEl = document.getElementById('timer');
+      timerEl.classList.toggle('urgent', game.raidTimeLeft < 60);
       document.getElementById('hp-text').textContent = Math.ceil(p.hp);
       document.getElementById('hp-bar').style.width = `${(p.hp / p.maxHp) * 100}%`;
       document.getElementById('extract-bar').style.width = `${(p.extractProgress / EXTRACT_TIME) * 100}%`;

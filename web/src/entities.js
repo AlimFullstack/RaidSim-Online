@@ -105,15 +105,33 @@ export class LootPoint {
 
   draw(ctx) {
     if (this.searched) return;
-    ctx.fillStyle = this.tier === 'valuable' ? COLORS.lootRare : COLORS.loot;
-    ctx.globalAlpha = 0.35 + Math.sin(Date.now() / 300) * 0.15;
+    const t = Date.now() / 300;
+    const glow = this.tier === 'valuable' ? COLORS.lootRare : COLORS.loot;
+
+    ctx.globalAlpha = 0.2 + Math.sin(t) * 0.1;
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r + 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = glow;
+    ctx.globalAlpha = 0.5 + Math.sin(t) * 0.2;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = this.tier === 'valuable' ? COLORS.lootRare : COLORS.loot;
+
+    ctx.strokeStyle = glow;
     ctx.lineWidth = 2;
     ctx.stroke();
+
+    if (this.tier === 'valuable') {
+      ctx.fillStyle = '#ffe08a';
+      ctx.font = '10px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText('★', this.x, this.y - this.r - 6);
+    }
 
     if (this.searching) {
       ctx.strokeStyle = '#fff';
@@ -388,8 +406,12 @@ export class Scav extends Entity {
   }
 }
 
-export function drawMap(ctx) {
-  ctx.fillStyle = COLORS.floor;
+export function drawMap(ctx, time = 0) {
+  const bg = ctx.createLinearGradient(0, 0, MAP_W, MAP_H);
+  bg.addColorStop(0, '#141a12');
+  bg.addColorStop(0.5, COLORS.floor);
+  bg.addColorStop(1, '#12180f');
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, MAP_W, MAP_H);
 
   ctx.strokeStyle = COLORS.floorGrid;
@@ -408,20 +430,45 @@ export function drawMap(ctx) {
   for (const w of WALLS) {
     ctx.fillStyle = COLORS.wall;
     ctx.fillRect(w.x, w.y, w.w, w.h);
-    ctx.fillStyle = COLORS.wallTop;
-    ctx.fillRect(w.x, w.y, w.w, Math.min(10, w.h * 0.15));
+    const top = ctx.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
+    top.addColorStop(0, COLORS.wallTop);
+    top.addColorStop(0.3, COLORS.wall);
+    top.addColorStop(1, '#2e2820');
+    ctx.fillStyle = top;
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.strokeStyle = 'rgba(201, 162, 39, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
   }
 
-  ctx.fillStyle = COLORS.extract;
+  const pulse = 0.5 + Math.sin(time * 2.5) * 0.2;
+  ctx.fillStyle = `rgba(46, 204, 113, ${0.15 + pulse * 0.15})`;
   ctx.fillRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
+
+  const glow = ctx.createRadialGradient(
+    EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2,
+    EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2,
+    10,
+    EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2,
+    EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2,
+    EXTRACT_ZONE.w * 0.7
+  );
+  glow.addColorStop(0, `rgba(255, 215, 0, ${0.08 + pulse * 0.06})`);
+  glow.addColorStop(1, 'rgba(46, 204, 113, 0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
+
   ctx.strokeStyle = COLORS.extractBorder;
   ctx.lineWidth = 3;
   ctx.setLineDash([12, 8]);
   ctx.strokeRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
   ctx.setLineDash([]);
 
-  ctx.fillStyle = COLORS.extractBorder;
+  ctx.shadowColor = '#2ecc71';
+  ctx.shadowBlur = 8 + pulse * 6;
+  ctx.fillStyle = '#a8f0c8';
   ctx.font = 'bold 18px Oswald';
   ctx.textAlign = 'center';
-  ctx.fillText('ЭКСТРАКТ', EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2, EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2 + 6);
+  ctx.fillText('✦ ЭКСТРАКТ ✦', EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2, EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2 + 6);
+  ctx.shadowBlur = 0;
 }

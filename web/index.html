@@ -3,83 +3,108 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tarkov Cubes — Raid</title>
+    <meta name="description" content="RaidSim-Online — браузерный рейд в духе Escape from Tarkov на карте 4×4" />
+    <title>RaidSim-Online — Тарков на кубиках</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@400;500;700&family=Playfair+Display:ital,wght@1,600&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <canvas id="festive-bg" aria-hidden="true"></canvas>
+
     <div id="app">
-      <canvas id="game" width="960" height="720"></canvas>
+      <div class="game-frame">
+        <div class="frame-corner tl"></div>
+        <div class="frame-corner tr"></div>
+        <div class="frame-corner bl"></div>
+        <div class="frame-corner br"></div>
+        <canvas id="game" width="960" height="720"></canvas>
+      </div>
 
       <div id="hud" class="hidden">
         <div class="hud-top">
+          <div class="brand-mini">RaidSim</div>
           <div class="raid-timer">
-            <span class="label">РЕЙД</span>
-            <span id="timer">12:00</span>
+            <span class="label">⏱ РЕЙД</span>
+            <span id="timer">08:00</span>
           </div>
           <div id="status-msg"></div>
         </div>
 
         <div class="hud-bottom">
           <div class="panel vitals">
+            <div class="panel-head">❤ СОСТОЯНИЕ</div>
             <div class="bar-wrap">
               <span>HP</span>
               <div class="bar"><div id="hp-bar" class="fill hp"></div></div>
               <span id="hp-text">100</span>
             </div>
             <div class="bar-wrap">
-              <span>ЭКСТРАКТ</span>
+              <span>EXIT</span>
               <div class="bar"><div id="extract-bar" class="fill extract"></div></div>
             </div>
           </div>
 
           <div class="panel weapon">
+            <div class="panel-head">🔫 ОРУЖИЕ</div>
             <div id="weapon-name">ПМ</div>
-            <div id="ammo">12 / 12</div>
+            <div id="ammo">12 / 24</div>
             <div class="hint">R — перезарядка</div>
           </div>
 
           <div class="panel inventory">
-            <div class="inv-title">РЮКЗАК <span id="inv-count">0/6</span></div>
+            <div class="inv-title">🎒 РЮКЗАК <span id="inv-count">0/6</span></div>
             <div id="inv-slots" class="inv-slots"></div>
           </div>
         </div>
 
         <div class="controls-hint">
-          WASD — движение · Мышь — прицел · ЛКМ — огонь · E — лут · F — аптечка
+          WASD · Мышь · ЛКМ · E лут · F аптечка
         </div>
       </div>
 
       <div id="overlay" class="overlay">
+        <div class="overlay-glow"></div>
         <div class="overlay-card">
+          <div class="festive-ribbon">✦ Праздничный рейд ✦</div>
           <p class="tag">ESCAPE FROM CUBES</p>
-          <h1>TARKOV CUBES</h1>
+          <h1>
+            <span class="title-main">RaidSim</span>
+            <span class="title-sub">Online</span>
+          </h1>
+          <p class="festive-greeting">Добро пожаловать в Норвинскую ночь — карта 4×4 ждёт.</p>
           <p class="subtitle">
-            Рейд на карте 4×4. Собери лут, переживи Scav'ов и выйди через зелёную зону экстракта до конца таймера.
+            Собери лут за кубиками-укрытиями, переживи Scav'ов и выйди через зелёную зону экстракта до конца таймера.
           </p>
           <ul class="features">
-            <li>Таймер рейда — 8 минут</li>
-            <li>Укрытия из «кубиков» на карте</li>
-            <li>Лут, патроны, аптечки</li>
-            <li>Смерть = потеря всего лута</li>
+            <li><span>🎯</span> Топдаун-шутер в духе Таркова</li>
+            <li><span>📦</span> Лут, патроны, броня и аптечки</li>
+            <li><span>⏳</span> 8 минут на рейд — не опоздай на экстракт</li>
+            <li><span>💀</span> Умер — весь лут остался на карте</li>
           </ul>
-          <button id="btn-start" class="btn primary">НАЧАТЬ РЕЙД</button>
-          <p class="deploy-note">Статический сайт — деплой папки <code>dist</code> на Netlify / Vercel / GitHub Pages</p>
+          <button id="btn-start" class="btn primary">
+            <span class="btn-shine"></span>
+            НАЧАТЬ РЕЙД
+          </button>
+          <p class="deploy-note">alimfrontend.github.io/RaidSim-Online</p>
         </div>
       </div>
 
       <div id="end-screen" class="overlay hidden">
+        <div class="overlay-glow"></div>
         <div class="overlay-card end">
           <p class="tag" id="end-tag">MIA</p>
           <h1 id="end-title">ТЫ ПОГИБ</h1>
           <p id="end-desc">Весь лут остался на карте.</p>
           <div id="end-loot" class="end-loot"></div>
-          <button id="btn-retry" class="btn primary">НОВЫЙ РЕЙД</button>
+          <button id="btn-retry" class="btn primary">
+            <span class="btn-shine"></span>
+            НОВЫЙ РЕЙД
+          </button>
         </div>
       </div>
     </div>
