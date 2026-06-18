@@ -2,16 +2,16 @@ import {
   MAP_W,
   MAP_H,
   METER,
-  WALLS,
-  EXTRACT_ZONE,
   COLORS,
+  NIGHT_COLORS,
   circleRectCollision,
   resolveCircleRect,
   pointInRect,
   dist,
   clamp,
   generateScavLoot,
-} from './map.js';
+} from './map-core.js';
+import { getWeapon } from './weapons.js';
 
 export class Input {
   constructor(canvas) {
@@ -23,7 +23,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (!this.keys.has(e.code)) this.justPressed.add(e.code);
       this.keys.add(e.code);
-      if (['Space', 'KeyR', 'KeyE', 'KeyF'].includes(e.code)) e.preventDefault();
+      if (['Space', 'KeyR', 'KeyE', 'KeyF', 'KeyG', 'KeyV'].includes(e.code)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
 
@@ -59,9 +59,11 @@ export class Input {
 }
 
 export class Bullet {
-  constructor(x, y, angle, owner, damage = 18) {
+  constructor(x, y, angle, owner, damage = 18, walls = [], maxRange = 9999, originX = x, originY = y) {
     this.x = x;
     this.y = y;
+    this.ox = originX;
+    this.oy = originY;
     this.vx = Math.cos(angle) * 620;
     this.vy = Math.sin(angle) * 620;
     this.owner = owner;
@@ -69,6 +71,8 @@ export class Bullet {
     this.dead = false;
     this.life = 1.2;
     this.r = 4;
+    this.walls = walls;
+    this.maxRange = maxRange;
   }
 
   update(dt) {
@@ -76,10 +80,14 @@ export class Bullet {
     this.y += this.vy * dt;
     this.life -= dt;
     if (this.life <= 0) this.dead = true;
+    if (dist(this.ox, this.oy, this.x, this.y) > this.maxRange) this.dead = true;
     if (this.x < 0 || this.y < 0 || this.x > MAP_W || this.y > MAP_H) this.dead = true;
-    for (const w of WALLS) {
+    for (const w of this.walls) {
       if (circleRectCollision(this.x, this.y, this.r, w)) {
         this.dead = true;
+        this.hitWall = true;
+        this.hitX = this.x;
+        this.hitY = this.y;
         break;
       }
     }
@@ -145,10 +153,11 @@ export class LootPoint {
 }
 
 export class Entity {
-  constructor(x, y, r) {
+  constructor(x, y, r, walls = []) {
     this.x = x;
     this.y = y;
     this.r = r;
+    this.walls = walls;
     this.hp = 100;
     this.maxHp = 100;
     this.angle = 0;
@@ -169,7 +178,7 @@ export class Entity {
   tryMove(nx, ny) {
     let nxPos = clamp(this.x + nx, this.r, MAP_W - this.r);
     let nyPos = clamp(this.y + ny, this.r, MAP_H - this.r);
-    for (const w of WALLS) {
+    for (const w of this.walls) {
       if (circleRectCollision(nxPos, this.y, this.r, w)) {
         const resolved = resolveCircleRect(nxPos, this.y, this.r, w);
         nxPos = resolved.x;
@@ -202,7 +211,7 @@ export class Entity {
     for (let i = 1; i <= steps; i++) {
       const px = this.x + ((tx - this.x) * i) / steps;
       const py = this.y + ((ty - this.y) * i) / steps;
-      for (const w of WALLS) {
+      for (const w of this.walls) {
         if (pointInRect(px, py, w)) return false;
       }
     }
@@ -211,22 +220,40 @@ export class Entity {
 }
 
 export class Player extends Entity {
-  constructor(x, y) {
-    super(x, y, 16);
-    this.magSize = 12;
-    this.ammo = 12;
+  constructor(x, y, walls = [], weaponId = 'pm') {
+    super(x, y, 16, walls);
+    this.equipWeapon(weaponId);
     this.reserve = 24;
     this.fireCooldown = 0;
     this.reloadTime = 0;
     this.inventory = [];
     this.maxInv = 6;
     this.medkits = 1;
+    this.grenades = 0;
+    this.smokes = 0;
     this.extractProgress = 0;
     this.kills = 0;
+    this.maxArmor = 0;
+    this.isSprinting = false;
+    this.noiseLevel = 0;
   }
 
+  equipWeapon(id) {
+    const w = getWeapon(id);
+    this.weaponId = w.id;
+    this.weaponName = w.name;
+    this.magSize = w.magSize;
+    this.ammo = w.magSize;
+    this.weaponDamage = w.damage;
+    this.fireRate = w.fireRate;
+    this.spread = w.spread;
+    this.pellets = w.pellets;
+    this.weaponRange = w.range;
+  }
+
+  /** @returns {Bullet[]|null} */
   update(input, dt) {
-    if (this.dead) return;
+    if (this.dead) return null;
 
     let dx = 0;
     let dy = 0;
@@ -234,7 +261,12 @@ export class Player extends Entity {
     if (input.pressed('KeyS') || input.pressed('ArrowDown')) dy += 1;
     if (input.pressed('KeyA') || input.pressed('ArrowLeft')) dx -= 1;
     if (input.pressed('KeyD') || input.pressed('ArrowRight')) dx += 1;
+
+    this.isSprinting = input.pressed('ShiftLeft') || input.pressed('ShiftRight');
+    if (this.isSprinting && (dx || dy)) this.speed = 260;
+    else this.speed = 180;
     this.move(dx, dy, dt);
+    this.noiseLevel = this.isSprinting && (dx || dy) ? 1 : dx || dy ? 0.4 : 0;
 
     this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
 
@@ -257,8 +289,18 @@ export class Player extends Entity {
 
     if (input.mouse.down && this.fireCooldown <= 0 && this.ammo > 0) {
       this.ammo -= 1;
-      this.fireCooldown = 0.18;
-      return new Bullet(this.x + Math.cos(this.angle) * 20, this.y + Math.sin(this.angle) * 20, this.angle, 'player');
+      this.fireCooldown = this.fireRate;
+      this.noiseLevel = 1;
+      const bullets = [];
+      const ox = this.x + Math.cos(this.angle) * 20;
+      const oy = this.y + Math.sin(this.angle) * 20;
+      for (let i = 0; i < this.pellets; i++) {
+        const spread = (Math.random() - 0.5) * this.spread * 2;
+        bullets.push(
+          new Bullet(ox, oy, this.angle + spread, 'player', this.weaponDamage, this.walls, this.weaponRange, ox, oy)
+        );
+      }
+      return bullets;
     }
     return null;
   }
@@ -290,7 +332,20 @@ export class Player extends Entity {
     }
     if (item.armor) {
       this.armor += item.armor;
+      this.maxArmor = Math.max(this.maxArmor, this.armor);
       return { ok: true, msg: 'Надет бронежилет' };
+    }
+    if (item.weapon) {
+      this.equipWeapon(item.weapon);
+      return { ok: true, msg: `Экипировано: ${item.name}` };
+    }
+    if (item.grenade) {
+      this.grenades += 1;
+      return { ok: true, msg: 'Граната (G)' };
+    }
+    if (item.smoke) {
+      this.smokes += 1;
+      return { ok: true, msg: 'Дымовая (V)' };
     }
     if (this.inventory.length >= this.maxInv) {
       return { ok: false, msg: 'Рюкзак полон!' };
@@ -322,19 +377,23 @@ export class Player extends Entity {
 }
 
 export class Scav extends Entity {
-  constructor(x, y) {
-    super(x, y, 15);
+  constructor(x, y, walls = [], opts = {}) {
+    super(x, y, opts.isBoss ? 20 : 15, walls);
     this.state = 'patrol';
     this.targetX = x;
     this.targetY = y;
     this.wait = 0;
     this.fireCooldown = 0;
-    this.speed = 120;
-    this.vision = 260;
-    this.name = 'Scav';
+    this.speed = opts.isBoss ? 90 : 120;
+    this.vision = opts.isBoss ? 320 : 260;
+    this.name = opts.isBoss ? 'Босс' : 'Scav';
+    this.isBoss = !!opts.isBoss;
+    this.hp = opts.isBoss ? 200 : 100;
+    this.maxHp = this.hp;
     this.loot = [];
     this.looted = false;
     this.searchProgress = 0;
+    this.alertPos = null;
   }
 
   onDeath() {
@@ -349,14 +408,22 @@ export class Scav extends Entity {
     this.wait = 1 + Math.random() * 2;
   }
 
-  update(dt, player, bullets) {
+  update(dt, player, bullets, noiseEvents = []) {
     if (this.dead) return null;
+
+    for (const n of noiseEvents) {
+      if (dist(this.x, this.y, n.x, n.y) < n.radius) {
+        this.alertPos = { x: n.x, y: n.y };
+        this.state = 'investigate';
+      }
+    }
 
     const d = dist(this.x, this.y, player.x, player.y);
     const seesPlayer = d < this.vision && this.hasLineOfSight(player.x, player.y);
 
     if (seesPlayer && !player.dead) {
       this.state = 'attack';
+      this.alertPos = null;
       this.angle = Math.atan2(player.y - this.y, player.x - this.x);
       const dx = player.x - this.x;
       const dy = player.y - this.y;
@@ -372,8 +439,17 @@ export class Scav extends Entity {
           this.y + Math.sin(this.angle) * 18,
           this.angle + spread,
           'scav',
-          14
+          this.isBoss ? 20 : 14,
+          this.walls
         );
+      }
+    } else if (this.state === 'investigate' && this.alertPos) {
+      const pdx = this.alertPos.x - this.x;
+      const pdy = this.alertPos.y - this.y;
+      if (Math.hypot(pdx, pdy) > 20) this.move(pdx, pdy, dt * 0.8);
+      else {
+        this.state = 'patrol';
+        this.alertPos = null;
       }
     } else {
       this.state = 'patrol';
@@ -402,7 +478,7 @@ export class Scav extends Entity {
     ctx.ellipse(0, 5, 13, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = COLORS.scav;
+    ctx.fillStyle = this.isBoss ? COLORS.boss || '#8e24aa' : COLORS.scav;
     ctx.beginPath();
     ctx.arc(0, 0, this.r, 0, Math.PI * 2);
     ctx.fill();
@@ -460,15 +536,62 @@ export class Scav extends Entity {
   }
 }
 
-export function drawMap(ctx, time = 0) {
+export class PlayerCorpse {
+  constructor(x, y, loot = []) {
+    this.x = x;
+    this.y = y;
+    this.loot = loot;
+    this.looted = false;
+    this.searchProgress = 0;
+    this.r = 18;
+  }
+
+  draw(ctx) {
+    ctx.fillStyle = '#2a3544';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+    if (!this.looted) {
+      ctx.fillStyle = '#7ec8ff';
+      ctx.font = '9px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText('PMC', this.x, this.y - 22);
+    }
+  }
+}
+
+export class SmokeZone {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.r = 120;
+    this.life = 8;
+  }
+
+  update(dt) {
+    this.life -= dt;
+  }
+
+  draw(ctx) {
+    ctx.fillStyle = 'rgba(120, 120, 120, 0.25)';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+export function drawMap(ctx, time = 0, mapConfig) {
+  const colors = mapConfig?.theme === 'night' ? NIGHT_COLORS : COLORS;
+  const walls = mapConfig?.walls || [];
+  const extractZone = mapConfig?.extractZone;
   const bg = ctx.createLinearGradient(0, 0, MAP_W, MAP_H);
   bg.addColorStop(0, '#141a12');
-  bg.addColorStop(0.5, COLORS.floor);
+  bg.addColorStop(0.5, colors.floor);
   bg.addColorStop(1, '#12180f');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, MAP_W, MAP_H);
 
-  ctx.strokeStyle = COLORS.floorGrid;
+  ctx.strokeStyle = colors.floorGrid;
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     ctx.beginPath();
@@ -481,12 +604,10 @@ export function drawMap(ctx, time = 0) {
     ctx.stroke();
   }
 
-  for (const w of WALLS) {
-    ctx.fillStyle = COLORS.wall;
-    ctx.fillRect(w.x, w.y, w.w, w.h);
+  for (const w of walls) {
     const top = ctx.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
-    top.addColorStop(0, COLORS.wallTop);
-    top.addColorStop(0.3, COLORS.wall);
+    top.addColorStop(0, colors.wallTop);
+    top.addColorStop(0.3, colors.wall);
     top.addColorStop(1, '#2e2820');
     ctx.fillStyle = top;
     ctx.fillRect(w.x, w.y, w.w, w.h);
@@ -495,27 +616,29 @@ export function drawMap(ctx, time = 0) {
     ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
   }
 
+  if (!extractZone) return;
+
   const pulse = 0.5 + Math.sin(time * 2.5) * 0.2;
   ctx.fillStyle = `rgba(46, 204, 113, ${0.15 + pulse * 0.15})`;
-  ctx.fillRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
+  ctx.fillRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
 
   const glow = ctx.createRadialGradient(
-    EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2,
-    EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2,
+    extractZone.x + extractZone.w / 2,
+    extractZone.y + extractZone.h / 2,
     10,
-    EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2,
-    EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2,
-    EXTRACT_ZONE.w * 0.7
+    extractZone.x + extractZone.w / 2,
+    extractZone.y + extractZone.h / 2,
+    extractZone.w * 0.7
   );
   glow.addColorStop(0, `rgba(255, 215, 0, ${0.08 + pulse * 0.06})`);
   glow.addColorStop(1, 'rgba(46, 204, 113, 0)');
   ctx.fillStyle = glow;
-  ctx.fillRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
+  ctx.fillRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
 
-  ctx.strokeStyle = COLORS.extractBorder;
+  ctx.strokeStyle = colors.extractBorder;
   ctx.lineWidth = 3;
   ctx.setLineDash([12, 8]);
-  ctx.strokeRect(EXTRACT_ZONE.x, EXTRACT_ZONE.y, EXTRACT_ZONE.w, EXTRACT_ZONE.h);
+  ctx.strokeRect(extractZone.x, extractZone.y, extractZone.w, extractZone.h);
   ctx.setLineDash([]);
 
   ctx.shadowColor = '#2ecc71';
@@ -523,6 +646,11 @@ export function drawMap(ctx, time = 0) {
   ctx.fillStyle = '#a8f0c8';
   ctx.font = 'bold 18px Oswald';
   ctx.textAlign = 'center';
-  ctx.fillText('✦ ЭКСТРАКТ ✦', EXTRACT_ZONE.x + EXTRACT_ZONE.w / 2, EXTRACT_ZONE.y + EXTRACT_ZONE.h / 2 + 6);
+  ctx.fillText('✦ ЭКСТРАКТ ✦', extractZone.x + extractZone.w / 2, extractZone.y + extractZone.h / 2 + 6);
   ctx.shadowBlur = 0;
+
+  if (mapConfig?.theme === 'night') {
+    ctx.fillStyle = 'rgba(0,0,20,0.45)';
+    ctx.fillRect(0, 0, MAP_W, MAP_H);
+  }
 }

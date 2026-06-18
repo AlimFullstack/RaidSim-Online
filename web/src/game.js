@@ -1,44 +1,43 @@
 import {
   MAP_W,
   MAP_H,
-  RAID_DURATION,
   EXTRACT_TIME,
-  SPAWN_PLAYER,
-  LOOT_POINTS,
-  SCAV_SPAWNS,
-  EXTRACT_ZONE,
   pointInRect,
   rollLoot,
   formatTime,
   dist,
-} from './map.js';
-import { Input, Player, Scav, Bullet, LootPoint, drawMap } from './entities.js';
+} from './map-core.js';
+import { loadMap } from './map-loader.js';
+import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, drawMap } from './entities.js';
 import { RAID_MODES } from './profile.js';
+import { drawMinimap } from './minimap.js';
+import { GameFx } from './fx.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
 
 export class Game {
-  constructor(canvas, ui, confetti = null, audio = null) {
+  constructor(canvas, ui, confetti = null, audio = null, fx = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.ui = ui;
     this.confetti = confetti;
     this.audio = audio;
+    this.fx = fx || new GameFx();
     this.input = new Input(canvas);
     this.state = 'menu';
     this.scale = 1;
     this.camX = 0;
     this.camY = 0;
-    this.statusMsg = '';
     this.statusTimer = 0;
     this.lastTime = 0;
     this.animTime = 0;
-    this.raidTimeLeft = RAID_DURATION;
+    this.raidTimeLeft = 480;
     this.bullets = [];
     this.lootPoints = [];
     this.scavs = [];
     this.player = null;
+    this.activeMap = null;
     this.extracting = false;
     this.endPayload = null;
     this.wasReloading = false;
@@ -46,28 +45,54 @@ export class Game {
     this.nearestInteract = null;
     this.emptyClickCooldown = 0;
     this.raidMode = 'standard';
+    this.noiseEvents = [];
+    this.smokeZones = [];
+    this.playerCorpse = null;
+    this.grenadeCooldown = 0;
+    this.searchSoundTimer = 0;
+    this.wasInExtract = false;
+    this.scavAlerted = new Set();
+    this.playerMoving = false;
   }
 
-  startRaid(mode = 'standard', loadout = {}) {
+  async startRaid(mode = 'standard', loadout = {}, mapId = 'factory') {
     this.audio?.init();
+    this.audio?.startMusic('raid');
+    this.fx.clear();
     this.raidMode = mode;
     const modeConfig = RAID_MODES[mode] || RAID_MODES.standard;
+    this.activeMap = await loadMap(mapId);
     this.state = 'raid';
     this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
-    this.player = new Player(SPAWN_PLAYER.x, SPAWN_PLAYER.y);
+    const walls = this.activeMap.walls;
+    const weaponId = loadout.weapon || 'pm';
+    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls, weaponId);
     if (loadout.extraMedkits) this.player.medkits += loadout.extraMedkits;
     if (loadout.extraAmmo) this.player.reserve += loadout.extraAmmo;
-    if (loadout.startArmor) this.player.armor += loadout.startArmor;
-    this.lootPoints = LOOT_POINTS.map((p) => new LootPoint(p.x, p.y, p.tier));
-    this.scavs = SCAV_SPAWNS.map((s) => new Scav(s.x, s.y));
+    if (loadout.startArmor) {
+      this.player.armor += loadout.startArmor;
+      this.player.maxArmor = loadout.startArmor;
+    }
+    this.lootPoints = this.activeMap.lootPoints.map((p) => new LootPoint(p.x, p.y, p.tier));
+    this.scavs = this.activeMap.scavSpawns.map((s) => new Scav(s.x, s.y, walls));
+    if (mode === 'boss' && this.activeMap.bossSpawn) {
+      const boss = new Scav(this.activeMap.bossSpawn.x, this.activeMap.bossSpawn.y, walls, { isBoss: true });
+      boss.loot = [
+        { id: 'gpu', name: 'Видеокарта', value: 15, uid: 'boss-gpu' },
+        { id: 'chain', name: 'Золотая цепь', value: 10, uid: 'boss-chain' },
+        { id: 'ak', name: 'АК-74', value: 20, weapon: 'ak', uid: 'boss-ak' },
+      ];
+      this.scavs.push(boss);
+    }
+    this.smokeZones = [];
+    this.playerCorpse = null;
+    this.noiseEvents = [];
+    this.scavAlerted = new Set();
+    this.wasInExtract = false;
+    this.searchSoundTimer = 0;
     this.extracting = false;
-    this.statusMsg = '';
     this.endPayload = null;
-    this.wasReloading = false;
-    this.lastExtractTick = -1;
-    this.nearestInteract = null;
-    this.emptyClickCooldown = 0;
     this.ui.showHud();
     this.ui.hideOverlay();
     this.ui.hideEnd();
@@ -76,10 +101,15 @@ export class Game {
     this.resize();
   }
 
-  setStatus(msg, duration = 2) {
-    this.statusMsg = msg;
+  setStatus(msg, duration = 2, kind = '') {
     this.statusTimer = duration;
-    this.ui.setStatus(msg);
+    this.ui.setStatus(msg, kind);
+  }
+
+  emitNoise(x, y, level) {
+    const radius = 80 + level * 200;
+    this.noiseEvents.push({ x, y, radius, life: 2 });
+    this.fx.noiseRipple(x, y, radius * 0.5);
   }
 
   update(dt) {
@@ -87,7 +117,7 @@ export class Game {
 
     this.raidTimeLeft -= dt;
     if (this.raidTimeLeft <= 0) {
-      this.endRaid('mia', 'Время вышло — MIA', 'Ты не успел на экстракт. Весь лут потерян.');
+      this.endRaid('mia', 'Время вышло — MIA', 'Ты не успел на экстракт.');
       return;
     }
 
@@ -96,33 +126,78 @@ export class Game {
       if (this.statusTimer <= 0) this.ui.setStatus('');
     }
 
+    this.noiseEvents = this.noiseEvents.filter((n) => {
+      n.life -= dt;
+      return n.life > 0;
+    });
+    this.smokeZones = this.smokeZones.filter((s) => {
+      s.update(dt);
+      return s.life > 0;
+    });
+    this.grenadeCooldown -= dt;
+    this.searchSoundTimer -= dt;
+
     const p = this.player;
     this.emptyClickCooldown -= dt;
+    this.playerMoving = false;
 
     if (!p.dead) {
-      if (this.input.tapped('KeyF')) {
-        if (p.useMedkit()) this.setStatus('Использована аптечка');
+      if (this.input.tapped('KeyF') && p.useMedkit()) {
+        this.audio?.play('medkit');
+        this.fx.healGlow(p.x, p.y);
+        this.fx.floatText(p.x, p.y - 20, '+50 HP', '#2ecc71');
+        this.setStatus('Аптечка', 1.5, 'heal');
+      }
+      if (this.input.tapped('KeyG') && p.grenades > 0 && this.grenadeCooldown <= 0) {
+        p.grenades -= 1;
+        this.grenadeCooldown = 1;
+        this.emitNoise(p.x, p.y, 1);
+        this.audio?.play('grenade');
+        this.fx.explosion(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40, 100);
+        for (const scav of this.scavs) {
+          if (scav.dead) continue;
+          if (dist(p.x, p.y, scav.x, scav.y) < 100) scav.takeDamage(45);
+        }
+        this.setStatus('Граната!', 1.5, 'combat');
+      }
+      if (this.input.tapped('KeyV') && p.smokes > 0) {
+        p.smokes -= 1;
+        this.smokeZones.push(new SmokeZone(p.x, p.y));
+        this.audio?.play('smoke');
+        this.fx.smokePuff(p.x, p.y);
+        this.setStatus('Дымовая завеса', 1.5, 'combat');
       }
 
       const reloading = p.reloadTime > 0;
-      if (this.wasReloading && !reloading && p.ammo > 0) {
+      if (this.input.tapped('KeyR') && p.ammo < p.magSize && p.reserve > 0 && p.reloadTime <= 0) {
         this.audio?.play('reload');
+        this.fx.floatText(p.x, p.y - 24, 'Перезарядка…', '#f5e6a8');
       }
+      if (this.wasReloading && !reloading && p.ammo > 0) this.audio?.play('reloadDone');
       this.wasReloading = reloading;
 
-      const bullet = p.update(this.input, dt);
-      if (bullet) {
-        this.bullets.push(bullet);
-        this.audio?.play('shoot');
-      } else if (
-        this.input.mouse.down &&
-        p.ammo <= 0 &&
-        p.reloadTime <= 0 &&
-        p.fireCooldown <= 0 &&
-        this.emptyClickCooldown <= 0
-      ) {
+      const movedBefore = { x: p.x, y: p.y };
+      const shot = p.update(this.input, dt);
+      if (p.x !== movedBefore.x || p.y !== movedBefore.y) {
+        this.playerMoving = true;
+        if (p.isSprinting) this.fx.footDust(p.x, p.y);
+      }
+      if (this.playerMoving) this.audio?.tickFootsteps(dt, p.isSprinting);
+
+      if (shot) {
+        const bullets = Array.isArray(shot) ? shot : [shot];
+        this.bullets.push(...bullets);
+        this.audio?.play('shoot', { weapon: p.weaponId });
+        const mx = p.x + Math.cos(p.angle) * 22;
+        const my = p.y + Math.sin(p.angle) * 22;
+        this.fx.muzzleFlash(mx, my, p.angle);
+        if (p.noiseLevel > 0.5) this.emitNoise(p.x, p.y, p.noiseLevel);
+      } else if (this.input.mouse.down && p.ammo <= 0 && p.reloadTime <= 0 && p.fireCooldown <= 0 && this.emptyClickCooldown <= 0) {
         this.audio?.play('empty');
         this.emptyClickCooldown = 0.35;
+        this.fx.muzzleFlash(p.x + Math.cos(p.angle) * 18, p.y + Math.sin(p.angle) * 18, p.angle, '#888');
+      } else if (p.noiseLevel > 0 && p.noiseLevel < 0.5) {
+        this.emitNoise(p.x, p.y, 0.3);
       }
 
       this.handleInteract(dt);
@@ -130,18 +205,35 @@ export class Game {
     }
 
     for (const scav of this.scavs) {
-      const b = scav.update(dt, p, this.bullets);
+      const wasAttack = scav.state === 'attack';
+      const b = scav.update(dt, p, this.bullets, this.noiseEvents);
+      if (!wasAttack && scav.state === 'attack' && !this.scavAlerted.has(scav)) {
+        this.scavAlerted.add(scav);
+        this.audio?.play('alert');
+        this.fx.floatText(scav.x, scav.y - 28, '!', '#ff6b6b');
+      }
       if (b) {
         this.bullets.push(b);
         this.audio?.play('shootEnemy');
+        this.fx.muzzleFlash(
+          scav.x + Math.cos(scav.angle) * 18,
+          scav.y + Math.sin(scav.angle) * 18,
+          scav.angle,
+          '#ff8888'
+        );
       }
     }
 
     this.updateBullets(dt);
 
-    if (p.dead) {
+    if (p.dead && !this.playerCorpse) {
+      this.playerCorpse = new PlayerCorpse(p.x, p.y, [...p.inventory]);
+      this.audio?.play('death');
+      this.fx.bloodBurst(p.x, p.y);
       this.endRaid('dead', 'ТЫ ПОГИБ', 'PMC уничтожен. Лут остался на карте.');
     }
+
+    this.fx.update(dt);
 
     this.updateCamera();
     this.ui.updateHud(this);
@@ -153,21 +245,24 @@ export class Game {
     let best = null;
     let bestDist = Infinity;
 
+    if (this.playerCorpse && !this.playerCorpse.looted) {
+      const d = dist(p.x, p.y, this.playerCorpse.x, this.playerCorpse.y);
+      if (d < INTERACT_RADIUS) best = { type: 'pmc', target: this.playerCorpse, x: this.playerCorpse.x, y: this.playerCorpse.y, d };
+    }
+
     for (const scav of this.scavs) {
       if (!scav.dead || scav.looted) continue;
       const d = dist(p.x, p.y, scav.x, scav.y);
-      if (d < INTERACT_RADIUS && d < bestDist) {
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
         best = { type: 'corpse', target: scav, x: scav.x, y: scav.y, d };
-        bestDist = d;
       }
     }
 
     for (const lp of this.lootPoints) {
       if (lp.searched) continue;
       const d = dist(p.x, p.y, lp.x, lp.y);
-      if (d < INTERACT_RADIUS && d < bestDist) {
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
         best = { type: 'loot', target: lp, x: lp.x, y: lp.y, d };
-        bestDist = d;
       }
     }
 
@@ -186,65 +281,84 @@ export class Game {
     if (!near || !this.input.pressed('KeyE')) {
       if (near?.type === 'loot') near.target.progress = 0;
       if (near?.type === 'corpse') near.target.searchProgress = 0;
+      if (near?.type === 'pmc') near.target.searchProgress = 0;
       return;
     }
 
-    if (near.type === 'loot') {
-      near.target.progress += dt / SEARCH_TIME;
-      if (near.target.progress < 1) return;
+    if (this.searchSoundTimer <= 0) {
+      this.audio?.play('search');
+      this.searchSoundTimer = 0.45;
+    }
 
+    const progKey = near.type === 'loot' ? 'progress' : 'searchProgress';
+    near.target[progKey] = (near.target[progKey] || 0) + dt / SEARCH_TIME;
+    if (near.target[progKey] < 1) return;
+
+    if (near.type === 'loot') {
       near.target.searched = true;
       near.target.searching = false;
       near.target.progress = 0;
       const item = rollLoot(near.target.tier);
       const result = p.addLoot(item);
-      if (result.ok && item.id !== 'empty') this.audio?.play('loot');
-      this.setStatus(result.msg, 2.5);
+      if (result.ok && item.id !== 'empty') {
+        this.audio?.play('loot');
+        this.fx.lootSparkle(near.x, near.y);
+        this.fx.floatText(near.x, near.y - 20, result.msg, '#5dade2');
+        if (item.weapon) this.audio?.play('equip');
+      } else if (!result.ok) {
+        this.audio?.play('fail');
+      }
+      this.setStatus(result.msg, 2.5, result.ok ? 'loot' : 'fail');
       return;
     }
 
-    if (near.type === 'corpse') {
-      const scav = near.target;
-      scav.searchProgress += dt / SEARCH_TIME;
-      if (scav.searchProgress < 1) return;
-
-      scav.looted = true;
-      scav.searchProgress = 0;
+    if (near.type === 'corpse' || near.type === 'pmc') {
+      const corpse = near.target;
+      corpse.looted = true;
+      corpse.searchProgress = 0;
       const msgs = [];
-      for (const item of scav.loot) {
+      for (const item of corpse.loot) {
         const result = p.addLoot(item);
-        if (result.ok) msgs.push(result.msg);
+        if (result.ok) {
+          msgs.push(result.msg);
+          if (item.weapon) this.audio?.play('equip');
+        }
       }
       this.audio?.play('loot');
-      this.setStatus(msgs.length ? `Обыск Scav: ${msgs.join(', ')}` : 'У Scav ничего не было', 3);
+      this.fx.lootSparkle(near.x, near.y);
+      const label = near.type === 'pmc' ? 'PMC' : 'Scav';
+      this.setStatus(msgs.length ? `Обыск ${label}: ${msgs.join(', ')}` : 'Пусто', 3, 'loot');
     }
   }
 
   handleExtract(dt) {
     const p = this.player;
-    const inside = pointInRect(p.x, p.y, EXTRACT_ZONE);
+    const zone = this.activeMap?.extractZone;
+    if (!zone) return;
+    const inside = pointInRect(p.x, p.y, zone);
 
     if (inside) {
+      if (!this.wasInExtract) {
+        this.audio?.play('extractZone');
+        this.wasInExtract = true;
+      }
       p.extractProgress += dt;
       this.extracting = true;
       const tick = Math.floor(p.extractProgress);
       if (tick > this.lastExtractTick) {
         this.lastExtractTick = tick;
         this.audio?.play('extract');
+        this.fx.extractPulse(p.x, p.y);
       }
       if (p.extractProgress >= EXTRACT_TIME) {
         const value = p.inventory.reduce((s, i) => s + (i.value || 0), 0);
-        this.endRaid(
-          'extracted',
-          'РЕЙД УСПЕШЕН',
-          `Ты вышел живым. Убийств: ${p.kills}. Стоимость лута: ${value}₽`,
-          true
-        );
+        this.endRaid('extracted', 'РЕЙД УСПЕШЕН', `Убийств: ${p.kills}. Лут: ${value}₽`, true);
       }
     } else {
       p.extractProgress = 0;
       this.extracting = false;
       this.lastExtractTick = -1;
+      this.wasInExtract = false;
     }
   }
 
@@ -253,7 +367,13 @@ export class Game {
     for (const b of this.bullets) {
       if (b.dead) continue;
       b.update(dt);
-      if (b.dead) continue;
+      if (b.dead) {
+        if (b.hitWall) {
+          this.audio?.play('wallHit');
+          this.fx.wallHit(b.hitX, b.hitY);
+        }
+        continue;
+      }
 
       if (b.owner === 'player') {
         for (const scav of this.scavs) {
@@ -261,21 +381,32 @@ export class Game {
           if (dist(b.x, b.y, scav.x, scav.y) < scav.r + b.r) {
             scav.takeDamage(b.damage);
             b.dead = true;
+            this.fx.hitSparks(b.x, b.y);
             this.audio?.play('hit');
             if (scav.dead) {
-              scav.onDeath();
+              if (!scav.loot?.length) scav.onDeath();
               p.kills += 1;
               this.audio?.play('kill');
-              this.setStatus('Scav убит — E чтобы обыскать');
+              this.fx.bloodBurst(scav.x, scav.y);
+              this.setStatus(scav.isBoss ? 'Босс убит!' : 'Scav убит — E обыск', 2, 'combat');
             }
             break;
           }
         }
       } else if (b.owner === 'scav' && !p.dead) {
-        if (dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
+        let inSmoke = false;
+        for (const s of this.smokeZones) {
+          if (dist(b.x, b.y, s.x, s.y) < s.r) inSmoke = true;
+        }
+        if (!inSmoke && dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
+          const armorBefore = p.armor;
           p.takeDamage(b.damage);
           b.dead = true;
-          this.audio?.play('hit');
+          this.fx.hitSparks(b.x, b.y);
+          if (armorBefore > p.armor) this.audio?.play('hitArmor');
+          else this.audio?.play('hit');
+          this.fx.damageScreen(b.damage);
+          this.fx.floatText(p.x, p.y - 18, `-${b.damage}`, '#ff6b6b');
         }
       }
     }
@@ -292,13 +423,14 @@ export class Game {
       loot: survived ? [...p.inventory] : [],
       kills: p.kills,
       mode: this.raidMode,
+      mapId: this.activeMap?.id,
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
     this.audio?.playRaidEnd(type === 'extracted');
-    if (type === 'extracted' && this.confetti) {
-      this.confetti.burst(150);
-    }
+    const musicDelay = type === 'extracted' ? 2800 : 1600;
+    setTimeout(() => this.audio?.startMusic('lobby'), musicDelay);
+    if (type === 'extracted' && this.confetti) this.confetti.burst(150);
   }
 
   getEndPayload() {
@@ -326,14 +458,14 @@ export class Game {
   drawInteractHint(ctx) {
     const near = this.nearestInteract;
     if (!near || this.state !== 'raid') return;
-
-    const label = near.type === 'corpse' ? 'E — обыск Scav' : 'E — поиск лута';
+    const labels = { corpse: 'E — обыск Scav', loot: 'E — поиск лута', pmc: 'E — обыск тела' };
+    const label = labels[near.type];
     ctx.font = '12px JetBrains Mono';
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     const tw = ctx.measureText(label).width + 16;
     ctx.fillRect(near.x - tw / 2, near.y - 42, tw, 20);
-    ctx.fillStyle = near.type === 'corpse' ? '#ff8a80' : '#7ec8ff';
+    ctx.fillStyle = '#7ec8ff';
     ctx.fillText(label, near.x, near.y - 28);
   }
 
@@ -342,28 +474,30 @@ export class Game {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0d0f0c';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
     if (this.state === 'menu') return;
 
     ctx.setTransform(this.scale, 0, 0, this.scale, -this.camX * this.scale, -this.camY * this.scale);
-    drawMap(ctx, this.animTime);
-
+    drawMap(ctx, this.animTime, this.activeMap);
+    for (const s of this.smokeZones) s.draw(ctx);
     for (const lp of this.lootPoints) lp.draw(ctx);
     for (const scav of this.scavs) scav.draw(ctx);
+    if (this.playerCorpse) this.playerCorpse.draw(ctx);
     if (this.player && !this.player.dead) this.player.draw(ctx);
     for (const b of this.bullets) b.draw(ctx);
+    this.fx.drawWorld(ctx);
     this.drawInteractHint(ctx);
 
-    if (this.player && this.extracting) {
+    if (this.player?.extracting) {
       ctx.fillStyle = 'rgba(46, 204, 113, 0.85)';
       ctx.font = '14px JetBrains Mono';
       ctx.textAlign = 'center';
-      ctx.fillText(
-        `ЭКСТРАКТ ${Math.ceil(EXTRACT_TIME - this.player.extractProgress)}с`,
-        this.player.x,
-        this.player.y - 28
-      );
+      ctx.fillText(`ЭКСТРАКТ ${Math.ceil(EXTRACT_TIME - this.player.extractProgress)}с`, this.player.x, this.player.y - 28);
     }
+
+    drawMinimap(ctx, this);
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.fx.drawScreen(ctx, this.canvas.width, this.canvas.height);
   }
 
   loop(ts) {
@@ -383,65 +517,54 @@ export function createUI() {
   const muteBtn = document.getElementById('btn-mute');
 
   return {
-    showHud() {
-      hud.classList.remove('hidden');
-    },
-    hideHud() {
-      hud.classList.add('hidden');
-    },
-    hideOverlay() {
-      overlay.classList.add('hidden');
-    },
-    showOverlay() {
-      overlay.classList.remove('hidden');
-    },
-    hideEnd() {
-      endScreen.classList.add('hidden');
-    },
+    showHud() { hud.classList.remove('hidden'); },
+    hideHud() { hud.classList.add('hidden'); },
+    hideOverlay() { overlay.classList.add('hidden'); },
+    showOverlay() { overlay.classList.remove('hidden'); },
+    hideEnd() { endScreen.classList.add('hidden'); },
     updateMuteButton(muted) {
       if (muteBtn) muteBtn.textContent = muted ? '🔇' : '🔊';
-      muteBtn?.setAttribute('aria-label', muted ? 'Включить звук' : 'Выключить звук');
     },
     showEnd(payload) {
       endScreen.classList.remove('hidden');
       const card = endScreen.querySelector('.overlay-card');
       card.classList.remove('win', 'lose', 'mia');
       card.classList.add(payload.type === 'extracted' ? 'win' : payload.type === 'mia' ? 'mia' : 'lose');
-
-      const tag = document.getElementById('end-tag');
-      const title = document.getElementById('end-title');
-      const desc = document.getElementById('end-desc');
+      document.getElementById('end-tag').textContent = payload.type === 'extracted' ? '✦ SURVIVED ✦' : payload.type === 'mia' ? 'MIA' : 'KIA';
+      document.getElementById('end-title').textContent = payload.title;
+      document.getElementById('end-desc').textContent = payload.desc;
       const lootEl = document.getElementById('end-loot');
-
-      tag.textContent = payload.type === 'extracted' ? '✦ SURVIVED ✦' : payload.type === 'mia' ? 'MIA' : 'KIA';
-      title.textContent = payload.title;
-      desc.textContent = payload.desc;
-
-      if (payload.loot.length) {
-        lootEl.innerHTML = payload.loot.map((i) => `<span class="loot-chip">${i.name} (${i.value || 0}₽)</span>`).join('');
-      } else {
-        lootEl.innerHTML = '<span class="loot-chip empty">Лут не сохранён</span>';
-      }
-
+      lootEl.innerHTML = payload.loot.length
+        ? payload.loot.map((i) => `<span class="loot-chip">${i.name} (${i.value || 0}₽)</span>`).join('')
+        : '<span class="loot-chip empty">Лут не сохранён</span>';
       const backBtn = document.getElementById('btn-retry');
       if (backBtn) backBtn.textContent = 'В ЛОББИ';
     },
-    setStatus(msg) {
-      document.getElementById('status-msg').textContent = msg;
+    setStatus(msg, kind = '') {
+      const el = document.getElementById('status-msg');
+      el.textContent = msg;
+      el.classList.remove('status-loot', 'status-combat', 'status-heal', 'status-fail', 'pop');
+      if (kind) el.classList.add(`status-${kind}`);
+      if (msg) {
+        void el.offsetWidth;
+        el.classList.add('pop');
+      }
     },
     updateHud(game) {
       const p = game.player;
       if (!p) return;
-
       document.getElementById('timer').textContent = formatTime(Math.max(0, game.raidTimeLeft));
-      const timerEl = document.getElementById('timer');
-      timerEl.classList.toggle('urgent', game.raidTimeLeft < 60);
+      document.getElementById('timer').classList.toggle('urgent', game.raidTimeLeft < 60);
       document.getElementById('hp-text').textContent = Math.ceil(p.hp);
       document.getElementById('hp-bar').style.width = `${(p.hp / p.maxHp) * 100}%`;
       document.getElementById('extract-bar').style.width = `${(p.extractProgress / EXTRACT_TIME) * 100}%`;
       document.getElementById('ammo').textContent = `${p.ammo} / ${p.reserve}`;
+      document.getElementById('weapon-name').textContent = p.weaponName || 'ПМ';
       document.getElementById('inv-count').textContent = `${p.inventory.length}/${p.maxInv}`;
-
+      const armorEl = document.getElementById('armor-bar');
+      const armorText = document.getElementById('armor-text');
+      if (armorEl) armorEl.style.width = `${p.maxArmor > 0 ? (p.armor / p.maxArmor) * 100 : 0}%`;
+      if (armorText) armorText.textContent = Math.ceil(p.armor);
       const slots = document.getElementById('inv-slots');
       slots.innerHTML = '';
       for (let i = 0; i < p.maxInv; i++) {
@@ -449,7 +572,6 @@ export function createUI() {
         const div = document.createElement('div');
         div.className = 'slot' + (item ? ' filled' : '');
         div.textContent = item ? item.name.slice(0, 8) : '—';
-        if (item?.value) div.title = `${item.name} — ${item.value}₽`;
         slots.appendChild(div);
       }
     },

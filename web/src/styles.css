@@ -224,6 +224,41 @@ body {
   min-height: 32px;
   border-left: 3px solid var(--accent);
   backdrop-filter: blur(8px);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+#status-msg.pop {
+  animation: status-pop 0.35s ease;
+}
+
+#status-msg.status-loot {
+  border-left-color: #5dade2;
+}
+
+#status-msg.status-combat {
+  border-left-color: #e74c3c;
+}
+
+#status-msg.status-heal {
+  border-left-color: #2ecc71;
+}
+
+#status-msg.status-fail {
+  border-left-color: #e67e22;
+}
+
+@keyframes status-pop {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.5;
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .hud-bottom {
@@ -283,6 +318,18 @@ body {
 .fill.extract {
   background: linear-gradient(90deg, #1a6b40, var(--ok), #7dffb0);
   box-shadow: 0 0 8px var(--glow-green);
+}
+
+.fill.armor {
+  background: linear-gradient(90deg, #1a3a5c, #5dade2, #85c1e9);
+  box-shadow: 0 0 8px rgba(93, 173, 226, 0.5);
+}
+
+#armor-text {
+  font-size: 11px;
+  color: #5dade2;
+  min-width: 24px;
+  text-align: right;
 }
 
 .weapon {
@@ -785,6 +832,45 @@ body {
 
 .lobby-side-btn:hover {
   background: rgba(201, 162, 39, 0.1);
+}
+
+.lobby-side-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quest-panel {
+  margin: 8px 0;
+  padding: 12px 16px;
+  background: rgba(201, 162, 39, 0.06);
+  border: 1px solid var(--border-gold);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.quest-label {
+  font-family: 'Oswald', sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  margin-right: 8px;
+}
+
+.hideout-stats {
+  font-size: 13px;
+  line-height: 1.8;
+  margin-bottom: 16px;
+}
+
+.hideout-stats .guest-warn {
+  color: #e74c3c;
+  font-size: 11px;
+}
+
+.hideout-stats .save-ok {
+  color: var(--ok);
+  font-size: 11px;
 }
 
 .loadout-info {

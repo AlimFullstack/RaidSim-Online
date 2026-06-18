@@ -167,3 +167,250 @@ export class Confetti {
     }
   }
 }
+
+/** In-world and screen-space combat / interaction feedback */
+export class GameFx {
+  constructor() {
+    this.particles = [];
+    this.floats = [];
+    this.rings = [];
+    this.muzzles = [];
+    this.screenFlash = 0;
+    this.screenFlashColor = '#ff0000';
+    this.vignette = 0;
+    this.extractGlow = 0;
+  }
+
+  clear() {
+    this.particles = [];
+    this.floats = [];
+    this.rings = [];
+    this.muzzles = [];
+    this.screenFlash = 0;
+    this.vignette = 0;
+    this.extractGlow = 0;
+  }
+
+  spawnParticles(x, y, opts = {}) {
+    const {
+      count = 8,
+      color = '#f5e6a8',
+      speed = 120,
+      life = 0.4,
+      size = 3,
+      spread = Math.PI * 2,
+      angle = 0,
+    } = opts;
+    for (let i = 0; i < count; i++) {
+      const a = angle + (Math.random() - 0.5) * spread;
+      const sp = speed * (0.4 + Math.random() * 0.6);
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life,
+        maxLife: life,
+        size: size * (0.6 + Math.random() * 0.8),
+        color,
+      });
+    }
+  }
+
+  floatText(x, y, text, color = '#fff') {
+    this.floats.push({ x, y, text, color, life: 1.4, vy: -40 });
+  }
+
+  muzzleFlash(x, y, angle, color = '#ffe08a') {
+    this.muzzles.push({ x, y, angle, life: 0.08, color });
+    this.spawnParticles(x, y, { count: 4, color, speed: 80, life: 0.12, size: 2, spread: 0.5, angle });
+  }
+
+  hitSparks(x, y) {
+    this.spawnParticles(x, y, { count: 10, color: '#ff6b6b', speed: 160, life: 0.25, size: 3 });
+    this.spawnParticles(x, y, { count: 6, color: '#ffe08a', speed: 100, life: 0.2, size: 2 });
+  }
+
+  bloodBurst(x, y) {
+    this.spawnParticles(x, y, { count: 14, color: '#c0392b', speed: 90, life: 0.5, size: 4 });
+  }
+
+  lootSparkle(x, y) {
+    this.spawnParticles(x, y, { count: 16, color: '#5dade2', speed: 70, life: 0.6, size: 3 });
+    this.spawnParticles(x, y, { count: 8, color: '#ffd700', speed: 50, life: 0.5, size: 2 });
+    this.rings.push({ x, y, r: 8, maxR: 40, life: 0.5, color: 'rgba(93, 173, 226, 0.6)' });
+  }
+
+  explosion(x, y, radius = 100) {
+    this.rings.push({ x, y, r: 10, maxR: radius, life: 0.45, color: 'rgba(255, 120, 40, 0.7)' });
+    this.rings.push({ x, y, r: 6, maxR: radius * 0.7, life: 0.35, color: 'rgba(255, 220, 100, 0.5)' });
+    this.spawnParticles(x, y, { count: 24, color: '#ff6b35', speed: 200, life: 0.5, size: 5 });
+    this.spawnParticles(x, y, { count: 12, color: '#555', speed: 80, life: 0.8, size: 6 });
+    this.screenFlash = 0.15;
+    this.screenFlashColor = 'rgba(255, 100, 40, 0.35)';
+  }
+
+  smokePuff(x, y) {
+    for (let i = 0; i < 10; i++) {
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 30,
+        y: y + (Math.random() - 0.5) * 30,
+        vx: (Math.random() - 0.5) * 20,
+        vy: -20 - Math.random() * 30,
+        life: 1.2 + Math.random() * 0.8,
+        maxLife: 2,
+        size: 12 + Math.random() * 16,
+        color: 'rgba(160, 160, 160, 0.5)',
+        smoke: true,
+      });
+    }
+  }
+
+  noiseRipple(x, y, radius) {
+    this.rings.push({ x, y, r: 12, maxR: radius, life: 0.8, color: 'rgba(255, 200, 80, 0.25)' });
+  }
+
+  healGlow(x, y) {
+    this.rings.push({ x, y, r: 10, maxR: 50, life: 0.6, color: 'rgba(46, 204, 113, 0.5)' });
+    this.spawnParticles(x, y, { count: 10, color: '#2ecc71', speed: 40, life: 0.5, size: 3 });
+  }
+
+  extractPulse(x, y) {
+    this.rings.push({ x, y, r: 20, maxR: 55, life: 0.5, color: 'rgba(46, 204, 113, 0.4)' });
+    this.extractGlow = 0.4;
+  }
+
+  damageScreen(amount = 14) {
+    this.screenFlash = Math.min(0.45, this.screenFlash + 0.12);
+    this.screenFlashColor = `rgba(220, 40, 40, ${0.25 + amount / 80})`;
+    this.vignette = Math.min(0.7, this.vignette + 0.25);
+  }
+
+  wallHit(x, y) {
+    this.spawnParticles(x, y, { count: 6, color: '#8a7a60', speed: 60, life: 0.2, size: 2 });
+  }
+
+  footDust(x, y) {
+    this.particles.push({
+      x: x + (Math.random() - 0.5) * 8,
+      y: y + 10,
+      vx: (Math.random() - 0.5) * 15,
+      vy: -10,
+      life: 0.25,
+      maxLife: 0.25,
+      size: 2,
+      color: 'rgba(180, 160, 120, 0.4)',
+    });
+  }
+
+  update(dt) {
+    this.particles = this.particles.filter((p) => {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.smoke) {
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+        p.size += dt * 8;
+      } else {
+        p.vy += 120 * dt;
+      }
+      return p.life > 0;
+    });
+
+    this.floats = this.floats.filter((f) => {
+      f.life -= dt;
+      f.y += f.vy * dt;
+      f.vy *= 0.95;
+      return f.life > 0;
+    });
+
+    this.rings = this.rings.filter((r) => {
+      r.life -= dt;
+      r.r += (r.maxR - r.r) * dt * 6;
+      return r.life > 0;
+    });
+
+    this.muzzles = this.muzzles.filter((m) => {
+      m.life -= dt;
+      return m.life > 0;
+    });
+
+    if (this.screenFlash > 0) this.screenFlash = Math.max(0, this.screenFlash - dt * 1.8);
+    if (this.vignette > 0) this.vignette = Math.max(0, this.vignette - dt * 0.8);
+    if (this.extractGlow > 0) this.extractGlow = Math.max(0, this.extractGlow - dt * 1.2);
+  }
+
+  drawWorld(ctx) {
+    for (const r of this.rings) {
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = r.life * 1.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const m of this.muzzles) {
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(m.angle);
+      ctx.globalAlpha = m.life / 0.08;
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(18, -6);
+      ctx.lineTo(22, 0);
+      ctx.lineTo(18, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    for (const p of this.particles) {
+      ctx.globalAlpha = Math.min(1, p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    for (const f of this.floats) {
+      ctx.globalAlpha = Math.min(1, f.life);
+      ctx.font = 'bold 13px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillText(f.text, f.x + 1, f.y + 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawScreen(ctx, w, h) {
+    if (this.screenFlash > 0) {
+      ctx.fillStyle = this.screenFlashColor.includes('rgba') ? this.screenFlashColor : this.screenFlashColor;
+      ctx.globalAlpha = this.screenFlash;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.vignette > 0) {
+      const g = ctx.createRadialGradient(w / 2, h / 2, h * 0.2, w / 2, h / 2, h * 0.75);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, `rgba(120, 0, 0, ${this.vignette * 0.55})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    if (this.extractGlow > 0) {
+      const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.5);
+      g.addColorStop(0, `rgba(46, 204, 113, ${this.extractGlow * 0.12})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+}

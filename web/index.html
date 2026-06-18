@@ -48,6 +48,11 @@
               <span>EXIT</span>
               <div class="bar"><div id="extract-bar" class="fill extract"></div></div>
             </div>
+            <div class="bar-wrap">
+              <span>ARM</span>
+              <div class="bar"><div id="armor-bar" class="fill armor"></div></div>
+              <span id="armor-text">0</span>
+            </div>
           </div>
 
           <div class="panel weapon">
@@ -64,7 +69,7 @@
         </div>
 
         <div class="controls-hint">
-          WASD · Мышь · ЛКМ · E лут · F аптечка
+          WASD · Shift бег · Мышь · ЛКМ · E лут · F аптечка · G граната · V дым
         </div>
       </div>
 
@@ -100,12 +105,22 @@
         </div>
 
         <div class="lobby-main">
-          <button id="btn-stash" type="button" class="lobby-side-btn">СХРОН</button>
+          <button id="btn-hideout" type="button" class="lobby-side-btn">УБЕЖИЩЕ</button>
           <div class="lobby-center">
             <canvas id="lobby-char" width="160" height="200"></canvas>
             <p id="loadout-info" class="loadout-info">Стандартный выход</p>
           </div>
-          <button id="btn-shop" type="button" class="lobby-side-btn">МАГАЗИН</button>
+          <div class="lobby-side-stack">
+            <button id="btn-stash" type="button" class="lobby-side-btn">СХРОН</button>
+            <button id="btn-shop" type="button" class="lobby-side-btn">МАГАЗИН</button>
+          </div>
+        </div>
+
+        <div id="quest-panel" class="quest-panel"></div>
+
+        <div class="lobby-modes">
+          <p class="modes-label">Карта</p>
+          <div id="map-list" class="mode-list"></div>
         </div>
 
         <div class="lobby-modes">
@@ -125,6 +140,15 @@
           <h2>Схрон</h2>
           <div id="stash-grid" class="stash-grid"></div>
           <button id="stash-close" type="button" class="btn secondary">Закрыть</button>
+        </div>
+      </div>
+
+      <div id="hideout-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Убежище</h2>
+          <div id="hideout-stats" class="hideout-stats"></div>
+          <button type="button" id="btn-stash-from-hideout" class="btn secondary">Схрон</button>
+          <button id="hideout-close" type="button" class="btn secondary">Закрыть</button>
         </div>
       </div>
 

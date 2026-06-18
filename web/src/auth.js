@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app';
+import { getAnalytics, isSupported } from 'firebase/analytics';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -13,6 +14,7 @@ import { createDefaultProfile } from './profile.js';
 let app = null;
 let auth = null;
 let db = null;
+let analytics = null;
 
 function ensureFirebase() {
   if (!isFirebaseConfigured()) return false;
@@ -20,6 +22,11 @@ function ensureFirebase() {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    if (typeof window !== 'undefined') {
+      isSupported().then((ok) => {
+        if (ok) analytics = getAnalytics(app);
+      });
+    }
   }
   return true;
 }

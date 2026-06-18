@@ -1,12 +1,16 @@
 import { xpToLevel, xpForNextLevel, RAID_MODES, SHOP_ITEMS, buyShopItem, sellStashItem, applyRaidResult } from './profile.js';
+import { getMapList } from './map-loader.js';
+import { pickRandomQuest } from './quests.js';
 
 export class Lobby {
   constructor(auth, storage, callbacks) {
     this.auth = auth;
     this.storage = storage;
     this.callbacks = callbacks;
+    this.audio = callbacks.audio || null;
     this.profile = null;
     this.selectedMode = 'standard';
+    this.selectedMap = 'factory';
 
     this.el = {
       auth: document.getElementById('auth-screen'),
@@ -20,6 +24,8 @@ export class Lobby {
       rubles: document.getElementById('lobby-rubles'),
       guestBadge: document.getElementById('guest-badge'),
       modeList: document.getElementById('mode-list'),
+      mapList: document.getElementById('map-list'),
+      questPanel: document.getElementById('quest-panel'),
       stashGrid: document.getElementById('stash-grid'),
       shopList: document.getElementById('shop-list'),
       loadoutInfo: document.getElementById('loadout-info'),
@@ -28,17 +34,47 @@ export class Lobby {
 
     this.bindEvents();
     this.renderModes();
+    this.renderMaps();
     this.renderShop();
   }
 
+  renderMaps() {
+    if (!this.el.mapList) return;
+    this.el.mapList.innerHTML = getMapList()
+      .map(
+        (m) => `
+      <button type="button" class="mode-btn ${m.id === this.selectedMap ? 'active' : ''}" data-map="${m.id}">
+        <span class="mode-name">${m.name}</span>
+        <span class="mode-desc">${m.theme === 'night' ? 'Ночь' : 'День'}</span>
+      </button>`
+      )
+      .join('');
+    this.el.mapList.querySelectorAll('[data-map]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.selectedMap = btn.dataset.map;
+        this.renderMaps();
+      });
+    });
+  }
+
   bindEvents() {
-    document.getElementById('btn-guest')?.addEventListener('click', () => this.enterGuest());
-    document.getElementById('btn-google')?.addEventListener('click', () => this.enterGoogle());
-    document.getElementById('btn-play')?.addEventListener('click', () => this.play());
-    document.getElementById('btn-stash')?.addEventListener('click', () => this.openStash());
+    const uiClick = () => {
+      this.audio?.init();
+      this.audio?.play('uiClick');
+    };
+    document.getElementById('btn-guest')?.addEventListener('click', () => { uiClick(); this.enterGuest(); });
+    document.getElementById('btn-google')?.addEventListener('click', () => { uiClick(); this.enterGoogle(); });
+    document.getElementById('btn-play')?.addEventListener('click', () => { uiClick(); this.play(); });
+    document.getElementById('btn-stash')?.addEventListener('click', () => { uiClick(); this.openStash(); });
+    document.getElementById('btn-stash-from-hideout')?.addEventListener('click', () => {
+      document.getElementById('hideout-modal')?.classList.add('hidden');
+      this.openStash();
+    });
+    document.getElementById('btn-hideout')?.addEventListener('click', () => this.openHideout());
     document.getElementById('btn-shop')?.addEventListener('click', () => this.openShop());
     document.getElementById('btn-logout')?.addEventListener('click', () => this.logout());
     document.getElementById('stash-close')?.addEventListener('click', () => this.closeModals());
+    document.getElementById('hideout-close')?.addEventListener('click', () => this.closeModals());
     document.getElementById('shop-close')?.addEventListener('click', () => this.closeModals());
 
     if (!this.auth.isConfigured()) {
@@ -98,6 +134,9 @@ export class Lobby {
   async enterGuest() {
     await this.auth.signInGuest();
     this.profile = await this.storage.load();
+    if (!this.profile.quests?.active) {
+      this.profile.quests = { active: pickRandomQuest([]), completed: [] };
+    }
     this.showLobby();
   }
 
@@ -105,6 +144,10 @@ export class Lobby {
     try {
       await this.auth.signInGoogle();
       this.profile = await this.storage.load();
+      if (!this.profile.quests?.active) {
+        this.profile.quests = { active: pickRandomQuest(this.profile.quests?.completed || []), completed: this.profile.quests?.completed || [] };
+        await this.storage.save(this.profile);
+      }
       this.showLobby();
     } catch (e) {
       console.error(e);
@@ -133,7 +176,12 @@ export class Lobby {
 
   async onRaidEnd(result) {
     if (!this.profile) return;
+    const questId = this.profile.quests?.active?.id;
     this.profile = applyRaidResult(this.profile, { ...result, mode: this.selectedMode });
+    if (questId && !this.profile.quests?.active) {
+      this.audio?.play('questDone');
+      this.flash('Квест выполнен!');
+    }
     if (!this.auth.isGuest()) {
       await this.storage.save(this.profile);
       this.flash('Прогресс сохранён в облаке');
@@ -154,7 +202,21 @@ export class Lobby {
 
   play() {
     if (!this.profile) return;
-    this.callbacks.onPlay(this.selectedMode, this.profile.loadout);
+    this.callbacks.onPlay(this.selectedMode, this.profile.loadout, this.selectedMap);
+  }
+
+  openHideout() {
+    const el = document.getElementById('hideout-stats');
+    if (!el || !this.profile) return;
+    const s = this.profile.stats;
+    const stashCount = this.profile.stash?.items?.length || 0;
+    el.innerHTML = `
+      <p>Рейдов: <b>${s.raids}</b> · Экстрактов: <b>${s.extracts}</b> · Убийств: <b>${s.kills}</b></p>
+      <p>Лут всего: <b>${s.totalLootValue}₽</b> · Схрон: <b>${stashCount}/24</b></p>
+      <p>Убежище ур. <b>${this.profile.hideout?.level || 1}</b></p>
+      ${this.profile.isGuest ? '<p class="guest-warn">Гость — прогресс не сохранится при F5</p>' : '<p class="save-ok">Прогресс в облаке</p>'}
+    `;
+    document.getElementById('hideout-modal')?.classList.remove('hidden');
   }
 
   openStash() {
@@ -170,6 +232,7 @@ export class Lobby {
   closeModals() {
     this.el.stashModal?.classList.add('hidden');
     this.el.shopModal?.classList.add('hidden');
+    document.getElementById('hideout-modal')?.classList.add('hidden');
   }
 
   renderStash() {
@@ -222,6 +285,13 @@ export class Lobby {
     if (this.el.xpBar) this.el.xpBar.style.width = `${Math.min(100, pct)}%`;
     if (this.el.rubles) this.el.rubles.textContent = `${p.rubles} ₽`;
     if (this.el.guestBadge) this.el.guestBadge.classList.toggle('hidden', !p.isGuest);
+
+    const q = p.quests?.active;
+    if (this.el.questPanel) {
+      this.el.questPanel.innerHTML = q
+        ? `<span class="quest-label">КВЕСТ</span> ${q.title}<br><small>${q.desc}</small>`
+        : '<span class="quest-label">КВЕСТ</span> Нет активного';
+    }
 
     const ld = p.loadout || {};
     const parts = [];

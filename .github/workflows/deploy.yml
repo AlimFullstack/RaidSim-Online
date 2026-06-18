@@ -29,12 +29,13 @@ jobs:
       - name: Install & build
         working-directory: web
         env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_API_KEY: AIzaSyA-3aRyouBJxo1zf9VJh3ZVTANp5OOimYI
+          VITE_FIREBASE_AUTH_DOMAIN: raidsim-online.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: raidsim-online
+          VITE_FIREBASE_STORAGE_BUCKET: raidsim-online.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "101518243281"
+          VITE_FIREBASE_APP_ID: 1:101518243281:web:ee83a6accfd7b4b0fe1cf0
+          VITE_FIREBASE_MEASUREMENT_ID: G-8T1LBN9MSS
         run: |
           npm ci
           npm run build:pages

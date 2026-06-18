@@ -1,43 +1,33 @@
-# Настройка Google-входа и облачного сохранения
+# Firebase — RaidSim-Online
 
-RaidSim использует **Firebase Authentication** (Google) и **Cloud Firestore** для профиля, схрона и прогресса.
+Проект **raidsim-online** подключён в коде. Конфиг в `web/src/firebase-config.js` и `web/.env`.
 
-## 1. Создай проект Firebase
+## Что уже сделано в коде
 
-1. Открой [Firebase Console](https://console.firebase.google.com/)
-2. **Add project** → имя, например `raidsim-online`
-3. Отключи Google Analytics (не обязательно)
+- Firebase SDK (Auth + Firestore + Analytics)
+- Google-вход и сохранение профиля в `users/{uid}`
+- Сборка GitHub Pages с ключами Firebase
+- Правила Firestore: `firestore.rules`
 
-## 2. Web-приложение
+## Один раз в Firebase Console
 
-1. Project Overview → **Web** (`</>`)
-2. Скопируй `firebaseConfig`
-3. Создай файл `web/.env` из `web/.env.example` и вставь значения:
+Если Google-вход ещё не работает, включи в [консоли](https://console.firebase.google.com/project/raidsim-online):
 
-```env
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-```
+### 1. Authentication → Google → Enable
 
-## 3. Authentication
+### 2. Authentication → Settings → Authorized domains
 
-1. **Build → Authentication → Get started**
-2. **Sign-in method → Google → Enable**
-3. **Settings → Authorized domains** — добавь:
-   - `localhost`
-   - `alimfrontend.github.io`
+Добавь (если нет):
 
-## 4. Firestore
+- `localhost`
+- `alimfrontend.github.io`
 
-1. **Build → Firestore Database → Create database**
-2. Режим: **Start in test mode** (для разработки) или production rules ниже
-3. Регион: ближайший к игрокам
+### 3. Firestore Database → Create database
 
-### Правила безопасности (production)
+- Режим: **production** (правила уже в репозитории)
+- Регион: `europe-west` или ближайший
+
+Затем **Rules** → вставь из `firestore.rules` или:
 
 ```
 rules_version = '2';
@@ -50,51 +40,37 @@ service cloud.firestore {
 }
 ```
 
-## 5. GitHub Pages (CI)
+### 4. (Опционально) Задеплоить правила через CLI
 
-В репозитории GitHub: **Settings → Secrets and variables → Actions** — добавь те же `VITE_FIREBASE_*` как secrets.
-
-Обнови `.github/workflows/deploy.yml`:
-
-```yaml
-      - name: Install & build
-        working-directory: web
-        env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
-        run: |
-          npm ci
-          npm run build:pages
+```bash
+npm install -g firebase-tools
+firebase login
+cd d:\AI\tarkov-cubes
+firebase use raidsim-online
+firebase deploy --only firestore:rules
 ```
 
-## 6. Локальная проверка
+## Локальный запуск
 
 ```bash
 cd web
-cp .env.example .env
-# заполни .env
 npm install
 npm run dev
 ```
 
-## Режимы игры
+Файл `web/.env` уже создан.
+
+## Режимы
 
 | Режим | Сохранение |
 |-------|------------|
-| **Гость** | Только в памяти вкладки. F5 = всё пропало |
-| **Google** | Профиль в Firestore. Сохраняется после рейда |
+| **Гость** | Только в памяти вкладки |
+| **Google** | Firestore `users/{uid}` |
 
-## Структура профиля в Firestore
+## Структура профиля
 
 ```
 users/{uid}
   displayName, photoURL, email
-  xp, rubles
-  stash: { items: [...] }
-  loadout: { extraMedkits, extraAmmo, startArmor }
-  stats: { raids, extracts, kills, totalLootValue }
+  xp, rubles, stash, loadout, stats, quests, hideout
 ```

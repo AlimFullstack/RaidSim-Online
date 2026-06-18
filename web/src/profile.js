@@ -1,6 +1,7 @@
 export const RAID_MODES = {
   standard: { id: 'standard', name: 'Стандарт', duration: 8 * 60, desc: '8 минут, полный лут' },
   quick: { id: 'quick', name: 'Быстрый', duration: 5 * 60, desc: '5 минут, +20% XP' },
+  boss: { id: 'boss', name: 'Босс-рейд', duration: 10 * 60, desc: 'Босс в центре, редкий лут' },
 };
 
 export const SHOP_ITEMS = [
@@ -27,12 +28,16 @@ export function createDefaultProfile(overrides = {}) {
     stash: { items: [] },
     loadout: { extraMedkits: 0, extraAmmo: 0, startArmor: 0 },
     stats: { raids: 0, extracts: 0, kills: 0, totalLootValue: 0 },
+    quests: { active: null, completed: [] },
+    hideout: { level: 1 },
     ...overrides,
   };
 }
 
+import { evaluateQuest, applyQuestReward, pickRandomQuest } from './quests.js';
+
 export function applyRaidResult(profile, result) {
-  const p = { ...profile, stash: { items: [...profile.stash.items] }, loadout: { ...profile.loadout }, stats: { ...profile.stats } };
+  let p = { ...profile, stash: { items: [...profile.stash.items] }, loadout: { ...profile.loadout }, stats: { ...profile.stats }, quests: { ...profile.quests } };
   p.stats.raids += 1;
   p.stats.kills += result.kills || 0;
 
@@ -51,7 +56,16 @@ export function applyRaidResult(profile, result) {
     p.xp += xpGain;
   }
 
-  p.loadout = { extraMedkits: 0, extraAmmo: 0, startArmor: 0 };
+  p.loadout = { extraMedkits: 0, extraAmmo: 0, startArmor: 0, weapon: undefined };
+
+  const questResult = evaluateQuest(p, result);
+  if (questResult.completed && questResult.quest) {
+    p = applyQuestReward(p, questResult.quest);
+  }
+  if (!p.quests.active) {
+    p.quests = { ...p.quests, active: pickRandomQuest(p.quests.completed) };
+  }
+
   return p;
 }
 
