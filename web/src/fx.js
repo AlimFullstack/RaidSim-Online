@@ -1,5 +1,5 @@
 import { getMapTheme } from './map-atmosphere.js';
-import { buildVisionTheme, fillSoftVision } from './visibility.js';
+import { buildVisionTheme, computeVisionPolygon, punchVisionHole } from './visibility.js';
 
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
@@ -462,8 +462,13 @@ export class GameFx {
     fctx.fillStyle = theme.fogColor;
     fctx.fillRect(0, 0, fw, fh);
 
+    const px = p.x - camX + pad;
+    const py = p.y - camY + pad;
+    const visionPts = computeVisionPolygon(p.x, p.y, p.angle, game.activeMap.walls, theme);
+    const localPts = visionPts.map((pt) => ({ x: pt.x - camX + pad, y: pt.y - camY + pad }));
+
     fctx.globalCompositeOperation = 'destination-out';
-    fillSoftVision(fctx, p.x - camX + pad, p.y - camY + pad, theme.visionRadius);
+    punchVisionHole(fctx, localPts, px, py);
     fctx.globalCompositeOperation = 'source-over';
 
     ctx.drawImage(fc, camX - pad, camY - pad);
@@ -487,11 +492,11 @@ export class GameFx {
   }
 
   drawRaidVignette(ctx, w, h, light = false) {
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.42, w / 2, h / 2, Math.max(w, h) * 0.85);
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.92);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.7, light ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.06)');
-    g.addColorStop(0.92, light ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.14)');
-    g.addColorStop(1, light ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.22)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0)');
+    g.addColorStop(0.82, light ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.55)');
+    g.addColorStop(1, 'rgba(0,0,0,1)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }

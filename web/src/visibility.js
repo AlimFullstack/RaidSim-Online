@@ -1,13 +1,15 @@
-/** Доля экрана, которую игрок «видит» (по площади круга обзора) */
-export const VISION_COVERAGE_NORMAL = 0.92;
-export const VISION_COVERAGE_CRITICAL = 0.55;
+/** Доля экрана в круге обзора (меньше 1 — чёрные углы экрана как в Bullet Echo) */
+export const VISION_COVERAGE_NORMAL = 0.65;
+export const VISION_COVERAGE_CRITICAL = 0.32;
 export const CRITICAL_HP_RATIO = 0.2;
+/** −20% к радиусу от базовой формулы */
+export const VISION_RADIUS_SCALE = 0.8;
 
 /** @param {object} baseTheme @param {number} viewW @param {number} viewH @param {number} [hpRatio] */
 export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
   const halfDiag = Math.hypot(viewW, viewH) / 2;
   const coverage = hpRatio < CRITICAL_HP_RATIO ? VISION_COVERAGE_CRITICAL : VISION_COVERAGE_NORMAL;
-  const r = halfDiag * Math.sqrt(coverage) * 1.28;
+  const r = halfDiag * Math.sqrt(coverage) * VISION_RADIUS_SCALE;
   return {
     ...baseTheme,
     visionRadius: r,
@@ -16,17 +18,14 @@ export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
   };
 }
 
-/** Резкая «дыра фонаря» в чёрном тумане */
-export function fillSoftVision(ctx, px, py, radius) {
-  const g = ctx.createRadialGradient(px, py, 0, px, py, radius);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.75, 'rgba(255,255,255,1)');
-  g.addColorStop(0.88, 'rgba(255,255,255,0.85)');
-  g.addColorStop(0.96, 'rgba(255,255,255,0.25)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
+/** Вырезает дыру обзора в чёрном тумане — резкая граница, без просвета карты */
+export function punchVisionHole(ctx, points, px, py) {
+  if (!points.length) return;
+  ctx.fillStyle = '#fff';
   ctx.beginPath();
-  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.moveTo(px, py);
+  for (const p of points) ctx.lineTo(p.x, p.y);
+  ctx.closePath();
   ctx.fill();
 }
 

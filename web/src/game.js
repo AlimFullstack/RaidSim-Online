@@ -597,6 +597,7 @@ export class Game {
           if (dist(b.x, b.y, scav.x, scav.y) < scav.r + b.r) {
             const wasAlive = !scav.dead;
             scav.takeDamage(b.damage);
+            if (wasAlive) scav.onDamagedBy(p.x, p.y);
             b.dead = true;
             this.fx.hitSparks(b.x, b.y);
             this.audio?.play('hit');

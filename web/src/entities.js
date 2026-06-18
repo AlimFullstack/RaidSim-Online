@@ -805,7 +805,7 @@ export class Scav extends Entity {
     this.wait = 0;
     this.fireCooldown = 0;
     this.speed = this.isBoss ? 130 : 85;
-    this.vision = this.isBoss ? 340 : 260;
+    this.vision = this.isBoss ? 420 : 360;
     this.name = this.isBoss ? 'Босс' : 'Scav';
     this.hp = this.isBoss ? 400 : 100;
     this.maxHp = this.hp;
@@ -849,6 +849,14 @@ export class Scav extends Entity {
     return true;
   }
 
+  onDamagedBy(px, py) {
+    this.state = 'attack';
+    this.alertPos = null;
+    this.lostSightTimer = 0;
+    this.angle = Math.atan2(py - this.y, px - this.x);
+    this.fireCooldown = Math.min(this.fireCooldown, 0.06);
+  }
+
   tryShoot(player, d, dt) {
     if (this.reloadTime > 0 || this.fireLock > 0) return null;
     if (this.ammo <= 0) {
@@ -856,14 +864,14 @@ export class Scav extends Entity {
       return null;
     }
     if (this.fireCooldown > 0) return null;
-    if (d >= 320) return null;
+    if (d >= this.vision) return null;
 
     this.isFiring = true;
-    this.fireLock = 0.12;
+    this.fireLock = 0.06;
     this.ammo -= 1;
     this.fireCooldown = this.isBoss
-      ? 0.28 + Math.random() * 0.08
-      : 0.38 + Math.random() * 0.1;
+      ? 0.18 + Math.random() * 0.07
+      : 0.24 + Math.random() * 0.08;
     const spread = (Math.random() - 0.5) * 0.15;
     return new Bullet(
       this.x + Math.cos(this.angle) * 18,
@@ -899,6 +907,7 @@ export class Scav extends Entity {
     const seesPlayer = this.canSeePlayer(player, smokeZones);
 
     if (seesPlayer) {
+      if (this.state !== 'attack') this.fireCooldown = Math.min(this.fireCooldown, 0.1);
       this.state = 'attack';
       this.alertPos = null;
       this.lostSightTimer = 0;
@@ -914,9 +923,8 @@ export class Scav extends Entity {
     if (this.state === 'attack') {
       this.angle = Math.atan2(player.y - this.y, player.x - this.x);
       const canMove = this.fireLock <= 0 && !this.isFiring && this.fireCooldown <= 0;
-      if (canMove) {
-        if (d > 140) this.move(player.x - this.x, player.y - this.y, dt * 0.65);
-        else if (d < 90) this.move(this.x - player.x, this.y - player.y, dt * 0.45);
+      if (canMove && d < 75) {
+        this.move(this.x - player.x, this.y - player.y, dt * 0.55);
       }
       return this.tryShoot(player, d, dt);
     }

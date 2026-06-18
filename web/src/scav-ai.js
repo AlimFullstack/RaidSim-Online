@@ -6,7 +6,10 @@ export function alertNearbyScavs(scavs, x, y, radius, alertX, alertY) {
     if (s.dead) continue;
     if (dist(s.x, s.y, x, y) <= radius) {
       s.alertPos = { x: alertX, y: alertY };
-      if (s.state !== 'attack') s.state = 'investigate';
+        if (s.state !== 'attack') {
+          s.state = 'investigate';
+          s.fireCooldown = Math.min(s.fireCooldown ?? 0, 0.15);
+        }
     }
   }
 }
