@@ -435,15 +435,17 @@ export class Lobby {
         <span class="stash-drop-hint">↩ Перетащи из оператора — вернуть в схрон</span>
       </div>
       ${items
-      .map(
-        (item, i) => `
+        .map(
+          (item, i) => `
       <div class="stash-cell inv-slot filled" draggable="true" data-stash-idx="${i}" data-drop-zone="stash" title="Перетащи в рюкзак оператора">
         <span class="slot-ico">${itemIcon(item)}</span>
-        <span class="stash-cell-name">${item.name}${item.count > 1 ? ` ×${item.count}` : ''}</span>
+        <span class="stash-cell-name">${item.name}${item.count > 1 ? ' ×' + item.count : ''}</span>
         <span class="stash-cell-value">${(item.value || 0) * (item.count || 1)} ₽</span>
         <button type="button" class="sell-btn" data-idx="${i}">Продать</button>
       </div>`
-      .join('')}`;
+        )
+        .join('')}
+    `;
 
     this.el.stashGrid.querySelectorAll('.sell-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
