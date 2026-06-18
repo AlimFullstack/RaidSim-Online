@@ -13,6 +13,7 @@ import {
   dist,
 } from './map.js';
 import { Input, Player, Scav, Bullet, LootPoint, drawMap } from './entities.js';
+import { RAID_MODES } from './profile.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
@@ -44,14 +45,20 @@ export class Game {
     this.lastExtractTick = -1;
     this.nearestInteract = null;
     this.emptyClickCooldown = 0;
+    this.raidMode = 'standard';
   }
 
-  startRaid() {
+  startRaid(mode = 'standard', loadout = {}) {
     this.audio?.init();
+    this.raidMode = mode;
+    const modeConfig = RAID_MODES[mode] || RAID_MODES.standard;
     this.state = 'raid';
-    this.raidTimeLeft = RAID_DURATION;
+    this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
     this.player = new Player(SPAWN_PLAYER.x, SPAWN_PLAYER.y);
+    if (loadout.extraMedkits) this.player.medkits += loadout.extraMedkits;
+    if (loadout.extraAmmo) this.player.reserve += loadout.extraAmmo;
+    if (loadout.startArmor) this.player.armor += loadout.startArmor;
     this.lootPoints = LOOT_POINTS.map((p) => new LootPoint(p.x, p.y, p.tier));
     this.scavs = SCAV_SPAWNS.map((s) => new Scav(s.x, s.y));
     this.extracting = false;
@@ -64,6 +71,8 @@ export class Game {
     this.ui.showHud();
     this.ui.hideOverlay();
     this.ui.hideEnd();
+    document.getElementById('lobby-screen')?.classList.add('hidden');
+    document.getElementById('auth-screen')?.classList.add('hidden');
     this.resize();
   }
 
@@ -282,6 +291,7 @@ export class Game {
       desc,
       loot: survived ? [...p.inventory] : [],
       kills: p.kills,
+      mode: this.raidMode,
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
@@ -289,6 +299,10 @@ export class Game {
     if (type === 'extracted' && this.confetti) {
       this.confetti.burst(150);
     }
+  }
+
+  getEndPayload() {
+    return this.endPayload;
   }
 
   updateCamera() {
@@ -408,6 +422,9 @@ export function createUI() {
       } else {
         lootEl.innerHTML = '<span class="loot-chip empty">Лут не сохранён</span>';
       }
+
+      const backBtn = document.getElementById('btn-retry');
+      if (backBtn) backBtn.textContent = 'В ЛОББИ';
     },
     setStatus(msg) {
       document.getElementById('status-msg').textContent = msg;

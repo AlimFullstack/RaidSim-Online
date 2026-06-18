@@ -1,6 +1,8 @@
 import { Game, createUI } from './game.js';
 import { FestiveBackground, Confetti } from './fx.js';
 import { AudioManager } from './audio.js';
+import { AuthService, ProfileStorage } from './auth.js';
+import { Lobby } from './lobby.js';
 
 const canvas = document.getElementById('game');
 const ui = createUI();
@@ -11,17 +13,39 @@ festiveBg.loop();
 
 ui.updateMuteButton(audio.isMuted());
 
+const auth = new AuthService();
+const storage = new ProfileStorage(auth);
 const game = new Game(canvas, ui, confetti, audio);
 
-document.getElementById('btn-start').addEventListener('click', () => {
-  audio.init();
-  festiveBg.setActive(false);
-  game.startRaid();
-});
+let lobby = null;
 
-document.getElementById('btn-retry').addEventListener('click', () => {
+async function boot() {
+  lobby = new Lobby(auth, storage, {
+    onPlay(mode, loadout) {
+      audio.init();
+      festiveBg.setActive(false);
+      game.startRaid(mode, loadout);
+    },
+  });
+
+  await auth.init();
+
+  if (auth.isLoggedIn()) {
+    await lobby.refreshProfile();
+    lobby.showLobby();
+  } else {
+    lobby.showAuth();
+  }
+
+  document.getElementById('overlay')?.classList.add('hidden');
+}
+
+document.getElementById('btn-retry')?.addEventListener('click', async () => {
+  const payload = game.getEndPayload();
+  if (payload && lobby) {
+    await lobby.onRaidEnd(payload);
+  }
   ui.hideEnd();
-  ui.showOverlay();
   festiveBg.setActive(true);
   game.state = 'menu';
 });
@@ -35,3 +59,5 @@ document.getElementById('btn-mute')?.addEventListener('click', () => {
 window.addEventListener('resize', () => game.resize());
 game.resize();
 requestAnimationFrame((t) => game.loop(t));
+
+boot();

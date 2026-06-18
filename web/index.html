@@ -68,7 +68,76 @@
         </div>
       </div>
 
-      <div id="overlay" class="overlay">
+      <div id="auth-screen" class="overlay">
+        <div class="overlay-glow"></div>
+        <div class="overlay-card auth-card">
+          <p class="tag">RAIDSIM ONLINE</p>
+          <h1><span class="title-main">Вход</span></h1>
+          <p class="subtitle">Гость — без сохранения, прогресс пропадёт при обновлении страницы. Google — схрон и уровень в облаке.</p>
+          <p id="firebase-hint" class="firebase-hint hidden">Google-вход: добавьте Firebase (см. web/FIREBASE_SETUP.md)</p>
+          <button id="btn-guest" type="button" class="btn secondary">Играть как гость</button>
+          <button id="btn-google" type="button" class="btn google-btn">
+            <span class="g-icon">G</span> Войти через Google
+          </button>
+        </div>
+      </div>
+
+      <div id="lobby-screen" class="lobby-screen hidden">
+        <div class="lobby-header">
+          <div class="lobby-profile">
+            <div id="lobby-avatar" class="lobby-avatar">?</div>
+            <div>
+              <div id="lobby-name" class="lobby-name">Оператор</div>
+              <div id="lobby-level" class="lobby-level">Ур. 1</div>
+              <div class="xp-track"><div id="lobby-xp-bar" class="xp-fill"></div></div>
+            </div>
+          </div>
+          <div class="lobby-rubles-wrap">
+            <span id="lobby-rubles">0 ₽</span>
+            <span id="guest-badge" class="guest-badge hidden">ГОСТЬ</span>
+          </div>
+          <button id="btn-logout" type="button" class="btn-logout">Выйти</button>
+        </div>
+
+        <div class="lobby-main">
+          <button id="btn-stash" type="button" class="lobby-side-btn">СХРОН</button>
+          <div class="lobby-center">
+            <canvas id="lobby-char" width="160" height="200"></canvas>
+            <p id="loadout-info" class="loadout-info">Стандартный выход</p>
+          </div>
+          <button id="btn-shop" type="button" class="lobby-side-btn">МАГАЗИН</button>
+        </div>
+
+        <div class="lobby-modes">
+          <p class="modes-label">Режим рейда</p>
+          <div id="mode-list" class="mode-list"></div>
+        </div>
+
+        <button id="btn-play" type="button" class="btn primary lobby-play">
+          <span class="btn-shine"></span>
+          В РЕЙД
+        </button>
+        <div id="lobby-toast" class="lobby-toast"></div>
+      </div>
+
+      <div id="stash-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Схрон</h2>
+          <div id="stash-grid" class="stash-grid"></div>
+          <button id="stash-close" type="button" class="btn secondary">Закрыть</button>
+        </div>
+      </div>
+
+      <div id="shop-modal" class="modal hidden">
+        <div class="modal-card">
+          <h2>Магазин</h2>
+          <p class="modal-hint">Покупки применяются к следующему рейду</p>
+          <div id="shop-list" class="shop-list"></div>
+          <button id="shop-close" type="button" class="btn secondary">Закрыть</button>
+        </div>
+      </div>
+
+      <div id="overlay" class="overlay hidden">
         <div class="overlay-glow"></div>
         <div class="overlay-card">
           <div class="festive-ribbon">✦ Праздничный рейд ✦</div>
