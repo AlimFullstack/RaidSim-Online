@@ -1,5 +1,5 @@
 import { getMapTheme } from './map-atmosphere.js';
-import { buildVisionTheme, computeVisionPolygon, punchVisionHole } from './visibility.js';
+import { buildVisionTheme, computeVisionPolygon, punchSoftVisionHole } from './visibility.js';
 
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
@@ -468,7 +468,7 @@ export class GameFx {
     const localPts = visionPts.map((pt) => ({ x: pt.x - camX + pad, y: pt.y - camY + pad }));
 
     fctx.globalCompositeOperation = 'destination-out';
-    punchVisionHole(fctx, localPts, px, py);
+    punchSoftVisionHole(fctx, localPts, px, py, 22);
     fctx.globalCompositeOperation = 'source-over';
 
     ctx.drawImage(fc, camX - pad, camY - pad);

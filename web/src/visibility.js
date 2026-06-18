@@ -2,8 +2,8 @@
 export const VISION_COVERAGE_NORMAL = 0.65;
 export const VISION_COVERAGE_CRITICAL = 0.32;
 export const CRITICAL_HP_RATIO = 0.2;
-/** −20% к радиусу от базовой формулы */
-export const VISION_RADIUS_SCALE = 0.8;
+/** −20% к радиусу от базовой формулы, затем +12.5% к итоговому размеру */
+export const VISION_RADIUS_SCALE = 0.9;
 
 /** @param {object} baseTheme @param {number} viewW @param {number} viewH @param {number} [hpRatio] */
 export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
@@ -18,7 +18,7 @@ export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
   };
 }
 
-/** Вырезает дыру обзора в чёрном тумане — резкая граница, без просвета карты */
+/** Вырезает дыру обзора в чёрном тумане */
 export function punchVisionHole(ctx, points, px, py) {
   if (!points.length) return;
   ctx.fillStyle = '#fff';
@@ -27,6 +27,20 @@ export function punchVisionHole(ctx, points, px, py) {
   for (const p of points) ctx.lineTo(p.x, p.y);
   ctx.closePath();
   ctx.fill();
+}
+
+/** Мягкая размытая граница обзора (как фонарик) */
+export function punchSoftVisionHole(ctx, points, px, py, feather = 20) {
+  if (!points.length) return;
+  ctx.globalCompositeOperation = 'destination-out';
+  punchVisionHole(ctx, points, px, py);
+  if (feather > 0) {
+    ctx.filter = `blur(${feather}px)`;
+    ctx.globalAlpha = 0.92;
+    punchVisionHole(ctx, points, px, py);
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+  }
 }
 
 /** @param {number} ox @param {number} oy @param {number} dx @param {number} dy @param {{x:number,y:number,w:number,h:number}} rect */
