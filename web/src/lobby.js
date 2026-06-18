@@ -12,7 +12,7 @@ import { getMapList, getMapById } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
 
-const SHOP_ICONS = { medkit: '💊', ammo: '🔫', armor: '🛡' };
+const SHOP_ICONS = { medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
 const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
 
 export class Lobby {
@@ -231,12 +231,14 @@ export class Lobby {
   renderShop() {
     if (!this.el.shopList || !this.profile) return;
     const rubles = this.profile.rubles;
+    const equippedWeapon = this.profile.loadout?.weapon || 'pm';
     this.el.shopList.innerHTML = SHOP_ITEMS.map((item) => {
       const afford = rubles >= item.cost;
+      const equipped = item.type === 'weapon' && item.weaponId === equippedWeapon;
       return `
-      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
+      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}${equipped ? ' shop-card--equipped' : ''}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
         <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
-        <span class="shop-card-name">${item.name}</span>
+        <span class="shop-card-name">${item.name}${equipped ? ' ✓' : ''}</span>
         <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
         <span class="shop-card-cost">${item.cost} ₽</span>
       </button>`;
@@ -258,6 +260,10 @@ export class Lobby {
   }
 
   shopEffectDesc(item) {
+    if (item.type === 'weapon') {
+      const w = getWeapon(item.weaponId);
+      return `Оружие на рейд · урон ${w.damage} · маг. ${w.magSize}`;
+    }
     if (item.loadoutKey === 'extraMedkits') return '+1 аптечка к рейду';
     if (item.loadoutKey === 'extraAmmo') return `+${item.amount} патронов`;
     if (item.loadoutKey === 'startArmor') return `+${item.amount} брони на старт`;
@@ -313,16 +319,30 @@ export class Lobby {
   async onRaidEnd(result) {
     if (!this.profile) return;
     const questId = this.profile.quests?.active?.id;
+    const stashBefore = this.profile.stash?.items?.length || 0;
+    const rublesBefore = this.profile.rubles || 0;
     this.profile = applyRaidResult(this.profile, { ...result, mode: this.selectedMode });
     const questDone = questId && !this.profile.quests?.active;
     if (questDone) this.audio?.play('questDone');
-    if (!this.auth.isGuest()) {
+
+    if (result.type === 'extracted') {
+      const added = Math.max(0, (this.profile.stash?.items?.length || 0) - stashBefore);
+      const rublesGain = (this.profile.rubles || 0) - rublesBefore;
+      const lootNames = (result.loot || []).map((i) => i.name).join(', ') || '—';
+      if (!this.auth.isGuest()) {
+        await this.persistProfile(null);
+        this.flash(`Сохранено в облако: ${added} предм. в схрон · +${rublesGain}₽ (${lootNames})`);
+      } else {
+        this.flash(`Гость: ${added} предм. в схрон · +${rublesGain}₽ — пропадёт при F5`);
+      }
+    } else if (!this.auth.isGuest()) {
       await this.persistProfile(null);
-      this.flash('Прогресс сохранён в облаке');
+      this.flash('Статистика сохранена в облако');
     } else {
       this.flash('Гость: прогресс не сохранится при обновлении страницы');
     }
-    if (questDone) setTimeout(() => this.flash('Квест выполнен!'), 2600);
+
+    if (questDone) setTimeout(() => this.flash('Квест выполнен!'), 3200);
     this.showLobby();
   }
 
@@ -350,7 +370,7 @@ export class Lobby {
     }
 
     if (!items.length) {
-      this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. Вынеси лут с рейда.</p>';
+      this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. E — лут в слоты, кнопка РЮКЗАК — панель, экстракт — в схрон.</p>';
       return;
     }
 

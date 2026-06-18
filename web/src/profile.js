@@ -8,6 +8,8 @@ export const SHOP_ITEMS = [
   { id: 'medkit', name: 'Аптечка', cost: 50, loadoutKey: 'extraMedkits', amount: 1 },
   { id: 'ammo', name: 'Патроны +12', cost: 30, loadoutKey: 'extraAmmo', amount: 12 },
   { id: 'armor', name: 'Броня на рейд', cost: 100, loadoutKey: 'startArmor', amount: 25 },
+  { id: 'shotgun', name: 'Дробовик', cost: 180, type: 'weapon', weaponId: 'shotgun' },
+  { id: 'ak', name: 'АК-74', cost: 350, type: 'weapon', weaponId: 'ak' },
 ];
 
 export function xpToLevel(xp) {
@@ -32,7 +34,7 @@ export function createDefaultProfile(overrides = {}) {
     xp: 0,
     rubles: 0,
     stash: { items: [] },
-    loadout: { extraMedkits: 0, extraAmmo: 0, startArmor: 0 },
+    loadout: { weapon: 'pm', extraMedkits: 0, extraAmmo: 0, startArmor: 0 },
     stats: { raids: 0, extracts: 0, kills: 0, totalLootValue: 0 },
     quests: { active: null, completed: [] },
     hideout: { level: 1 },
@@ -62,7 +64,7 @@ export function applyRaidResult(profile, result) {
     p.xp += xpGain;
   }
 
-  p.loadout = { extraMedkits: 0, extraAmmo: 0, startArmor: 0 };
+  p.loadout = { weapon: p.loadout.weapon || 'pm', extraMedkits: 0, extraAmmo: 0, startArmor: 0 };
 
   const questResult = evaluateQuest(p, result);
   if (questResult.completed && questResult.quest) {
@@ -79,6 +81,10 @@ export function buyShopItem(profile, shopId) {
   const item = SHOP_ITEMS.find((i) => i.id === shopId);
   if (!item || profile.rubles < item.cost) return { ok: false, msg: 'Недостаточно рублей' };
   const p = { ...profile, loadout: { ...profile.loadout }, rubles: profile.rubles - item.cost };
+  if (item.type === 'weapon') {
+    p.loadout.weapon = item.weaponId;
+    return { ok: true, profile: p, msg: `На рейд: ${item.name}` };
+  }
   p.loadout[item.loadoutKey] = (p.loadout[item.loadoutKey] || 0) + item.amount;
   return { ok: true, profile: p, msg: `Куплено: ${item.name}` };
 }

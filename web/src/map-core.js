@@ -1,5 +1,5 @@
 export const METER = 200;
-export const WORLD_SCALE = 10;
+export const WORLD_SCALE = 3;
 export const GRID_UNITS = 4 * WORLD_SCALE;
 export const MAP_W = METER * GRID_UNITS;
 export const MAP_H = METER * GRID_UNITS;

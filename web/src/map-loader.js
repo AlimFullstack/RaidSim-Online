@@ -60,20 +60,20 @@ export function getMapList() {
   return [
     {
       id: 'factory',
-      name: 'Завод 40×40',
+      name: 'Завод 12×12',
       theme: 'default',
-      desc: 'Большая промзона с укрытиями и лут-точками',
+      desc: 'Компактная промзона — лут и Scav рядом',
       threat: 'Средняя',
-      scavCount: 18,
+      scavCount: 8,
       timeLabel: 'День',
     },
     {
       id: 'night',
-      name: 'Ночной сектор',
+      name: 'Ночной сектор 12×12',
       theme: 'night',
-      desc: 'Темнота снижает обзор, больше Scav',
+      desc: 'Темнота, плотные засады',
       threat: 'Высокая',
-      scavCount: 20,
+      scavCount: 9,
       timeLabel: 'Ночь',
     },
   ];

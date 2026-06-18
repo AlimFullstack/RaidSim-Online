@@ -9,15 +9,23 @@ function seededRandom(seed) {
   };
 }
 
+function clusterPoint(anchor, scale, rng, spread = 1.4) {
+  return {
+    x: anchor.x * scale + (rng() - 0.5) * spread,
+    y: anchor.y * scale + (rng() - 0.5) * spread,
+  };
+}
+
 /**
- * Expand a compact 4×4 map layout to a larger world (default ×10 → 40×40 grid units).
+ * Expand a compact 4×4 map layout to a larger world (default ×3 → 12×12 grid units).
  * @param {object} raw — map JSON
- * @param {number} [scale=10]
+ * @param {number} [scale=3]
  */
-export function expandRawMap(raw, scale = raw.worldScale ?? 10) {
+export function expandRawMap(raw, scale = raw.worldScale ?? 3) {
   const gridW = (raw.gridW ?? 4) * scale;
   const gridH = (raw.gridH ?? 4) * scale;
   const rng = seededRandom(raw.id || 'map');
+  const density = (scale / 10) ** 2;
 
   const mul = (v) => v * scale;
   const mulPt = (p) => ({ x: mul(p.x), y: mul(p.y) });
@@ -37,29 +45,45 @@ export function expandRawMap(raw, scale = raw.worldScale ?? 10) {
 
   const walls = [...borderWalls, ...interiorWalls];
 
-  for (let i = 0; i < 40; i++) {
+  const anchors = [
+    ...raw.lootPoints,
+    ...raw.scavSpawns,
+    raw.spawnPlayer,
+    raw.extractZone ? { x: raw.extractZone.x + 0.5, y: raw.extractZone.y + 0.5 } : null,
+  ].filter(Boolean);
+
+  const extraWalls = Math.max(8, Math.round(15 * density));
+  for (let i = 0; i < extraWalls; i++) {
+    const a = anchors[Math.floor(rng() * anchors.length)];
+    const p = clusterPoint(a, 1, rng, 1.1);
     walls.push({
-      x: 0.4 + rng() * (gridW - 1.2),
-      y: 0.4 + rng() * (gridH - 1.2),
-      w: 0.18 + rng() * 0.55,
-      h: 0.18 + rng() * 0.55,
+      x: Math.max(0.3, Math.min(gridW - 0.8, p.x)),
+      y: Math.max(0.3, Math.min(gridH - 0.8, p.y)),
+      w: 0.18 + rng() * 0.45,
+      h: 0.18 + rng() * 0.45,
     });
   }
 
   const lootPoints = raw.lootPoints.map((p) => ({ ...mulPt(p), tier: p.tier || 'normal' }));
-  for (let i = 0; i < 24; i++) {
+  const extraLoot = Math.max(6, Math.round(10 * density));
+  for (let i = 0; i < extraLoot; i++) {
+    const a = anchors[Math.floor(rng() * anchors.length)];
+    const p = clusterPoint(a, 1, rng, 1.6);
     lootPoints.push({
-      x: 0.5 + rng() * (gridW - 1),
-      y: 0.5 + rng() * (gridH - 1),
-      tier: rng() > 0.78 ? 'valuable' : 'normal',
+      x: Math.max(0.4, Math.min(gridW - 0.6, p.x)),
+      y: Math.max(0.4, Math.min(gridH - 0.6, p.y)),
+      tier: rng() > 0.75 ? 'valuable' : 'normal',
     });
   }
 
   const scavSpawns = raw.scavSpawns.map(mulPt);
-  for (let i = 0; i < 14; i++) {
+  const extraScavs = Math.max(3, Math.round(5 * density));
+  for (let i = 0; i < extraScavs; i++) {
+    const a = anchors[Math.floor(rng() * anchors.length)];
+    const p = clusterPoint(a, 1, rng, 1.8);
     scavSpawns.push({
-      x: 1 + rng() * (gridW - 2),
-      y: 1 + rng() * (gridH - 2),
+      x: Math.max(0.6, Math.min(gridW - 0.6, p.x)),
+      y: Math.max(0.6, Math.min(gridH - 0.6, p.y)),
     });
   }
 

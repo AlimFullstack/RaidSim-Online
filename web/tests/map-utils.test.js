@@ -67,9 +67,9 @@ describe('parseMapConfig', () => {
       lootPoints: [{ x: 2, y: 2, tier: 'normal' }],
       scavSpawns: [{ x: 1, y: 1 }],
     });
-    expect(map.mapW).toBe(8000);
-    expect(map.mapH).toBe(8000);
-    expect(map.spawnPlayer.x).toBe(1000);
-    expect(map.walls.some((w) => w.x === 2000)).toBe(true);
+    expect(map.mapW).toBe(2400);
+    expect(map.mapH).toBe(2400);
+    expect(map.spawnPlayer.x).toBe(300);
+    expect(map.walls.some((w) => w.x === 600)).toBe(true);
   });
 });

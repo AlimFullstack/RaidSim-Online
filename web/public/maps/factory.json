@@ -1,6 +1,7 @@
 {
   "id": "factory",
-  "name": "Завод 40×40",
+  "name": "Завод 12×12",
+  "worldScale": 3,
   "theme": "default",
   "walls": [
     { "x": 0, "y": 0, "w": 4, "h": 0.12, "m": 1 },

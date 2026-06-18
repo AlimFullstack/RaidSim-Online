@@ -24,7 +24,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (!this.keys.has(e.code)) this.justPressed.add(e.code);
       this.keys.add(e.code);
-      if (['Space', 'KeyR', 'KeyE', 'KeyF', 'KeyG', 'KeyV', 'KeyQ', 'Escape'].includes(e.code)) e.preventDefault();
+      if (['Space', 'KeyR', 'KeyE', 'KeyF', 'KeyG', 'KeyV', 'KeyQ', 'Escape', 'Tab', 'KeyI'].includes(e.code)) e.preventDefault();
       if (e.code.startsWith('Digit')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -33,6 +33,10 @@ export class Input {
       const rect = canvas.getBoundingClientRect();
       this.mouse.x = e.clientX - rect.left;
       this.mouse.y = e.clientY - rect.top;
+      this.mouse.displayScaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+      this.mouse.displayScaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+      this.mouse.screenX = this.mouse.x * this.mouse.displayScaleX;
+      this.mouse.screenY = this.mouse.y * this.mouse.displayScaleY;
     });
     canvas.addEventListener('mousedown', () => {
       this.mouse.down = true;
@@ -54,13 +58,15 @@ export class Input {
     this.justPressed.clear();
   }
 
-  updateWorld(camX, camY, scale, sens = 1) {
-    const cx = this.canvas.width / 2;
-    const cy = this.canvas.height / 2;
-    const dx = (this.mouse.x - cx) * sens;
-    const dy = (this.mouse.y - cy) * sens;
-    this.mouse.worldX = camX + cx / scale + dx / scale;
-    this.mouse.worldY = camY + cy / scale + dy / scale;
+  updateWorld(camX, camY, scale) {
+    const sx = this.mouse.displayScaleX ?? 1;
+    const sy = this.mouse.displayScaleY ?? 1;
+    const mx = this.mouse.x * sx;
+    const my = this.mouse.y * sy;
+    this.mouse.screenX = mx;
+    this.mouse.screenY = my;
+    this.mouse.worldX = camX + mx / scale;
+    this.mouse.worldY = camY + my / scale;
   }
 }
 
@@ -237,9 +243,7 @@ export class Player extends Entity {
     this.inventory = [];
     this.maxInv = 6;
     this.selectedSlot = 0;
-    this.medkits = 1;
-    this.grenades = 0;
-    this.smokes = 0;
+    this.weaponAmmo = {};
     this.extractProgress = 0;
     this.kills = 0;
     this.maxArmor = 0;
@@ -249,6 +253,120 @@ export class Player extends Entity {
     this.noiseLevel = 0;
     this.recoilHeat = 0;
     this.currentSpread = 0;
+  }
+
+  initRaidInventory(weaponId, loadout = {}) {
+    const w = getWeapon(weaponId);
+    this.inventory = [{ id: weaponId, name: w.name, weapon: weaponId, starter: true }];
+    this.inventory.push({ id: 'medkit', name: 'Аптечка', heal: 50, consumable: true });
+    for (let i = 0; i < (loadout.extraMedkits || 0); i++) {
+      this.inventory.push({ id: 'medkit', name: 'Аптечка', heal: 50, consumable: true });
+    }
+    this.weaponAmmo = {};
+    this.selectedSlot = 0;
+    this.selectSlot(0);
+    if (loadout.extraAmmo) this.reserve += loadout.extraAmmo;
+  }
+
+  getSelectedItem() {
+    return this.inventory[this.selectedSlot] || null;
+  }
+
+  canShoot() {
+    return !!this.getSelectedItem()?.weapon;
+  }
+
+  getSlotActionHint() {
+    const item = this.getSelectedItem();
+    const n = this.selectedSlot + 1;
+    if (!item) return `Слот ${n} пуст`;
+    if (item.weapon) return `Слот ${n}: ${item.name} · ЛКМ · R`;
+    if (item.heal) return `Слот ${n}: ${item.name} · F лечиться`;
+    if (item.grenade) return `Слот ${n}: ${item.name} · G бросить`;
+    if (item.smoke) return `Слот ${n}: ${item.name} · V дым`;
+    if (item.armor) return `Слот ${n}: ${item.name} · F надеть`;
+    if (item.value) return `Слот ${n}: ${item.name} · ${item.value}₽ · экстракт`;
+    return `Слот ${n}: ${item.name}`;
+  }
+
+  saveWeaponAmmo() {
+    if (!this.weaponId) return;
+    this.weaponAmmo[this.weaponId] = { ammo: this.ammo, reserve: this.reserve };
+  }
+
+  selectSlot(idx) {
+    if (idx < 0 || idx >= this.maxInv) return;
+    this.selectedSlot = idx;
+    const item = this.getSelectedItem();
+    if (item?.weapon) {
+      this.saveWeaponAmmo();
+      this.equipWeapon(item.weapon);
+      const cached = this.weaponAmmo[item.weapon];
+      if (cached) {
+        this.ammo = cached.ammo;
+        this.reserve = cached.reserve;
+      }
+    }
+  }
+
+  useSelectedHeal() {
+    const item = this.getSelectedItem();
+    if (!item?.heal) return { ok: false, msg: 'Выбери слот с аптечкой или бинтом' };
+    if (this.hp >= this.maxHp) return { ok: false, msg: 'HP полное' };
+    const amount = item.heal;
+    this.hp = Math.min(this.maxHp, this.hp + amount);
+    this.inventory.splice(this.selectedSlot, 1);
+    if (this.selectedSlot >= this.inventory.length) {
+      this.selectedSlot = Math.max(0, this.inventory.length - 1);
+    }
+    this.selectSlot(this.selectedSlot);
+    return { ok: true, msg: `+${amount} HP`, amount };
+  }
+
+  useSelectedArmor() {
+    const item = this.getSelectedItem();
+    if (!item?.armor) return { ok: false, msg: 'Выбери слот с бронёй' };
+    this.armor += item.armor;
+    this.maxArmor = Math.max(this.maxArmor, this.armor);
+    this.inventory.splice(this.selectedSlot, 1);
+    if (this.selectedSlot >= this.inventory.length) {
+      this.selectedSlot = Math.max(0, this.inventory.length - 1);
+    }
+    this.selectSlot(this.selectedSlot);
+    return { ok: true, msg: `Броня +${item.armor}` };
+  }
+
+  useSelectedSlot() {
+    const item = this.getSelectedItem();
+    if (!item) return { ok: false, msg: 'Пустой слот' };
+    if (item.heal) return this.useSelectedHeal();
+    if (item.armor) return this.useSelectedArmor();
+    if (item.weapon) return { ok: false, msg: 'Оружие — ЛКМ стрелять' };
+    if (item.grenade) return { ok: false, msg: 'Граната — G' };
+    if (item.smoke) return { ok: false, msg: 'Дымовая — V' };
+    return { ok: false, msg: 'Лут — вези на экстракт' };
+  }
+
+  useSelectedGrenade() {
+    const item = this.getSelectedItem();
+    if (!item?.grenade) return { ok: false, msg: 'Выбери слот с гранатой' };
+    this.inventory.splice(this.selectedSlot, 1);
+    if (this.selectedSlot >= this.inventory.length) {
+      this.selectedSlot = Math.max(0, this.inventory.length - 1);
+    }
+    this.selectSlot(this.selectedSlot);
+    return { ok: true, msg: 'Граната!' };
+  }
+
+  useSelectedSmoke() {
+    const item = this.getSelectedItem();
+    if (!item?.smoke) return { ok: false, msg: 'Выбери слот с дымовой' };
+    this.inventory.splice(this.selectedSlot, 1);
+    if (this.selectedSlot >= this.inventory.length) {
+      this.selectedSlot = Math.max(0, this.inventory.length - 1);
+    }
+    this.selectSlot(this.selectedSlot);
+    return { ok: true, msg: 'Дымовая завеса' };
   }
 
   equipWeapon(id) {
@@ -275,8 +393,13 @@ export class Player extends Entity {
     });
   }
 
+  useInventoryItem(idx) {
+    this.selectSlot(idx);
+    return this.useSelectedSlot();
+  }
+
   /** @returns {Bullet[]|null} */
-  update(input, dt) {
+  update(input, dt, combat = true) {
     if (this.dead) return null;
 
     let dx = 0;
@@ -288,7 +411,7 @@ export class Player extends Entity {
 
     this.isMoving = !!(dx || dy);
     this.isSprinting = (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving;
-    this.isFiring = input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
+    this.isFiring = combat && this.canShoot() && input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
 
     const baseSpeed = this.isSprinting ? 260 : 180;
     const shootSlow = this.isFiring || this.fireCooldown > this.fireRate * 0.4;
@@ -303,7 +426,7 @@ export class Player extends Entity {
     this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
 
     for (let i = 0; i < this.maxInv; i++) {
-      if (input.tapped(`Digit${i + 1}`)) this.selectedSlot = i;
+      if (input.tapped(`Digit${i + 1}`)) this.selectSlot(i);
     }
 
     if (this.reloadTime > 0) {
@@ -318,12 +441,12 @@ export class Player extends Entity {
     }
 
     this.fireCooldown -= dt;
-    if (input.tapped('KeyR') && this.ammo < this.magSize && this.reserve > 0) {
+    if (input.tapped('KeyR') && this.canShoot() && this.ammo < this.magSize && this.reserve > 0) {
       this.reloadTime = 1.4;
       return null;
     }
 
-    if (input.mouse.down && this.fireCooldown <= 0 && this.ammo > 0) {
+    if (combat && this.canShoot() && input.mouse.down && this.fireCooldown <= 0 && this.ammo > 0) {
       this.ammo -= 1;
       this.fireCooldown = this.fireRate;
       this.noiseLevel = 1;
@@ -346,56 +469,33 @@ export class Player extends Entity {
   dropSelected() {
     const item = this.inventory[this.selectedSlot];
     if (!item) return { ok: false, msg: 'Слот пуст' };
+    if (item.starter) return { ok: false, msg: 'Нельзя выбросить основное оружие' };
     this.inventory.splice(this.selectedSlot, 1);
     if (this.selectedSlot >= this.inventory.length) {
       this.selectedSlot = Math.max(0, this.inventory.length - 1);
     }
+    this.selectSlot(this.selectedSlot);
     return { ok: true, item, msg: `Выброшено: ${item.name}` };
-  }
-
-  useMedkit() {
-    if (this.medkits <= 0 || this.hp >= this.maxHp) return false;
-    this.medkits -= 1;
-    this.hp = Math.min(this.maxHp, this.hp + 50);
-    return true;
   }
 
   addLoot(item) {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
     if (item.ammo) {
       this.reserve += item.ammo;
-      return { ok: true, msg: `+${item.ammo} патронов` };
-    }
-    if (item.heal && item.consumable) {
-      this.medkits += 1;
-      return { ok: true, msg: 'Аптечка в инвентарь' };
-    }
-    if (item.heal && !item.consumable) {
-      this.hp = Math.min(this.maxHp, this.hp + item.heal);
-      return { ok: true, msg: `Бинт: +${item.heal} HP` };
-    }
-    if (item.armor) {
-      this.armor += item.armor;
-      this.maxArmor = Math.max(this.maxArmor, this.armor);
-      return { ok: true, msg: 'Надет бронежилет' };
-    }
-    if (item.weapon) {
-      this.equipWeapon(item.weapon);
-      return { ok: true, msg: `Экипировано: ${item.name}` };
-    }
-    if (item.grenade) {
-      this.grenades += 1;
-      return { ok: true, msg: 'Граната (G)' };
-    }
-    if (item.smoke) {
-      this.smokes += 1;
-      return { ok: true, msg: 'Дымовая (V)' };
+      return { ok: true, msg: `+${item.ammo} патронов в запас` };
     }
     if (this.inventory.length >= this.maxInv) {
-      return { ok: false, msg: 'Рюкзак полон!' };
+      return { ok: false, msg: 'Рюкзак полон! Выброси слот (Q) или разверни рюкзак' };
     }
     this.inventory.push(item);
-    return { ok: true, msg: `Подобрано: ${item.name}` };
+    const price = item.value ? ` · ${item.value}₽` : '';
+    let hint = 'выбери слот';
+    if (item.weapon) hint = '1–6 → ЛКМ';
+    else if (item.heal) hint = '1–6 → F';
+    else if (item.grenade) hint = '1–6 → G';
+    else if (item.smoke) hint = '1–6 → V';
+    else if (item.armor) hint = '1–6 → F';
+    return { ok: true, msg: `В рюкзак: ${item.name}${price} (${hint})` };
   }
 
   draw(ctx) {

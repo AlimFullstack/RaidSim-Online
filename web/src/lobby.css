@@ -780,6 +780,11 @@ body:has(.lobby-screen:not(.hidden)) #app {
   cursor: not-allowed;
 }
 
+.shop-card--equipped {
+  border-color: var(--ok) !important;
+  box-shadow: inset 0 0 0 1px rgba(46, 204, 113, 0.35);
+}
+
 .shop-card-icon {
   font-size: 24px;
 }

@@ -12,6 +12,7 @@ import { RAID_MODES } from './profile.js';
 import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
+import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
@@ -57,6 +58,7 @@ export class Game {
     this.settings = loadSettings();
     this._hudCache = '';
     this.settingsOpen = false;
+    this.inventoryUi = new RaidInventoryUI(this);
   }
 
   async startRaid(mode = 'standard', loadout = {}, mapId = 'factory') {
@@ -73,8 +75,7 @@ export class Game {
     const walls = this.activeMap.walls;
     const weaponId = loadout.weapon || 'pm';
     this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls, weaponId);
-    if (loadout.extraMedkits) this.player.medkits += loadout.extraMedkits;
-    if (loadout.extraAmmo) this.player.reserve += loadout.extraAmmo;
+    this.player.initRaidInventory(weaponId, loadout);
     if (loadout.startArmor) {
       this.player.armor += loadout.startArmor;
       this.player.maxArmor = loadout.startArmor;
@@ -105,6 +106,7 @@ export class Game {
     document.getElementById('lobby-screen')?.classList.add('hidden');
     document.getElementById('auth-screen')?.classList.add('hidden');
     this._hudCache = '';
+    this.inventoryUi?.toggle(false);
     this.resize();
   }
 
@@ -144,6 +146,12 @@ export class Game {
       return;
     }
 
+    if (this.input.tapped('Tab') || this.input.tapped('KeyI')) {
+      this.inventoryUi.toggle();
+    }
+
+    const combat = !this.inventoryUi.open;
+
     this.raidTimeLeft -= dt;
     if (this.raidTimeLeft <= 0) {
       this.endRaid('mia', 'Время вышло — MIA', 'Ты не успел на экстракт.');
@@ -171,30 +179,49 @@ export class Game {
     this.playerMoving = false;
 
     if (!p.dead) {
-      if (this.input.tapped('KeyF') && p.useMedkit()) {
-        this.audio?.play('medkit');
-        this.fx.healGlow(p.x, p.y);
-        this.fx.floatText(p.x, p.y - 20, '+50 HP', '#2ecc71');
-        this.setStatus('Аптечка', 1.5, 'heal');
-      }
-      if (this.input.tapped('KeyG') && p.grenades > 0 && this.grenadeCooldown <= 0) {
-        p.grenades -= 1;
-        this.grenadeCooldown = 1;
-        this.emitNoise(p.x, p.y, 1);
-        this.audio?.play('grenade');
-        this.fx.explosion(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40, 100);
-        for (const scav of this.scavs) {
-          if (scav.dead) continue;
-          if (dist(p.x, p.y, scav.x, scav.y) < 100) scav.takeDamage(45);
+      if (this.input.tapped('KeyF')) {
+        const heal = p.useSelectedSlot();
+        if (heal.ok) {
+          this.audio?.play('medkit');
+          this.fx.healGlow(p.x, p.y);
+          this.fx.floatText(p.x, p.y - 20, heal.msg, '#2ecc71');
+          this.setStatus(heal.msg, 1.5, 'heal');
+          this._hudCache = '';
+          if (this.inventoryUi.open) this.inventoryUi.render();
+        } else if (heal.msg) {
+          this.setStatus(heal.msg, 1.2, 'fail');
         }
-        this.setStatus('Граната!', 1.5, 'combat');
       }
-      if (this.input.tapped('KeyV') && p.smokes > 0) {
-        p.smokes -= 1;
-        this.smokeZones.push(new SmokeZone(p.x, p.y));
-        this.audio?.play('smoke');
-        this.fx.smokePuff(p.x, p.y);
-        this.setStatus('Дымовая завеса', 1.5, 'combat');
+      if (this.input.tapped('KeyG') && this.grenadeCooldown <= 0) {
+        const g = p.useSelectedGrenade();
+        if (g.ok) {
+          this.grenadeCooldown = 1;
+          this.emitNoise(p.x, p.y, 1);
+          this.audio?.play('grenade');
+          this.fx.explosion(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40, 100);
+          for (const scav of this.scavs) {
+            if (scav.dead) continue;
+            if (dist(p.x, p.y, scav.x, scav.y) < 100) scav.takeDamage(45);
+          }
+          this.setStatus('Граната!', 1.5, 'combat');
+          this._hudCache = '';
+          if (this.inventoryUi.open) this.inventoryUi.render();
+        } else if (g.msg) {
+          this.setStatus(g.msg, 1.2, 'fail');
+        }
+      }
+      if (this.input.tapped('KeyV')) {
+        const s = p.useSelectedSmoke();
+        if (s.ok) {
+          this.smokeZones.push(new SmokeZone(p.x, p.y));
+          this.audio?.play('smoke');
+          this.fx.smokePuff(p.x, p.y);
+          this.setStatus(s.msg, 1.5, 'combat');
+          this._hudCache = '';
+          if (this.inventoryUi.open) this.inventoryUi.render();
+        } else if (s.msg) {
+          this.setStatus(s.msg, 1.2, 'fail');
+        }
       }
       if (this.input.tapped('KeyQ')) {
         const drop = p.dropSelected();
@@ -205,6 +232,7 @@ export class Game {
           this.audio?.play('loot');
           this.fx.floatText(p.x, p.y - 20, drop.msg, '#a8b89a');
           this._hudCache = '';
+          if (this.inventoryUi.open) this.inventoryUi.render();
         } else if (!drop.ok) {
           this.setStatus(drop.msg, 1.5, 'fail');
         }
@@ -219,7 +247,7 @@ export class Game {
       this.wasReloading = reloading;
 
       const movedBefore = { x: p.x, y: p.y };
-      const shot = p.update(this.input, dt);
+      const shot = p.update(this.input, dt, combat);
       if (p.x !== movedBefore.x || p.y !== movedBefore.y) {
         this.playerMoving = true;
         if (p.isSprinting) this.fx.footDust(p.x, p.y);
@@ -234,7 +262,16 @@ export class Game {
         const my = p.y + Math.sin(p.angle) * 22;
         this.fx.muzzleFlash(mx, my, p.angle);
         if (p.noiseLevel > 0.5) this.emitNoise(p.x, p.y, p.noiseLevel);
-      } else if (this.input.mouse.down && p.ammo <= 0 && p.reloadTime <= 0 && p.fireCooldown <= 0 && this.emptyClickCooldown <= 0) {
+      } else if (
+        combat &&
+        this.input.mouse.down &&
+        !p.canShoot() &&
+        p.reloadTime <= 0 &&
+        this.emptyClickCooldown <= 0
+      ) {
+        this.setStatus(p.getSlotActionHint(), 1.2, 'fail');
+        this.emptyClickCooldown = 0.45;
+      } else if (this.input.mouse.down && p.ammo <= 0 && p.canShoot() && p.reloadTime <= 0 && p.fireCooldown <= 0 && this.emptyClickCooldown <= 0) {
         this.audio?.play('empty');
         this.emptyClickCooldown = 0.35;
         this.fx.muzzleFlash(p.x + Math.cos(p.angle) * 18, p.y + Math.sin(p.angle) * 18, p.angle, '#888');
@@ -279,6 +316,7 @@ export class Game {
 
     this.updateCamera();
     this.ui.updateHud(this);
+    if (this.inventoryUi.open) this.inventoryUi.render();
     this.input.endFrame();
   }
 
@@ -344,6 +382,7 @@ export class Game {
         this.audio?.play('loot');
         this.fx.lootSparkle(near.x, near.y);
         this._hudCache = '';
+        if (this.inventoryUi.open) this.inventoryUi.render();
         this.setStatus(result.msg, 2, 'loot');
       } else {
         this.audio?.play('fail');
@@ -376,6 +415,8 @@ export class Game {
         this.audio?.play('fail');
       }
       this.setStatus(result.msg, 2.5, result.ok ? 'loot' : 'fail');
+      this._hudCache = '';
+      if (this.inventoryUi.open) this.inventoryUi.render();
       return;
     }
 
@@ -395,6 +436,8 @@ export class Game {
       this.fx.lootSparkle(near.x, near.y);
       const label = near.type === 'pmc' ? 'PMC' : 'Scav';
       this.setStatus(msgs.length ? `Обыск ${label}: ${msgs.join(', ')}` : 'Пусто', 3, 'loot');
+      this._hudCache = '';
+      if (this.inventoryUi.open) this.inventoryUi.render();
     }
   }
 
@@ -418,7 +461,7 @@ export class Game {
         this.fx.extractPulse(p.x, p.y);
       }
       if (p.extractProgress >= EXTRACT_TIME) {
-        const value = p.inventory.reduce((s, i) => s + (i.value || 0), 0);
+        const value = p.inventory.filter((i) => !i.starter).reduce((s, i) => s + (i.value || 0), 0);
         this.endRaid('extracted', 'РЕЙД УСПЕШЕН', `Убийств: ${p.kills}. Лут: ${value}₽`, true);
       }
     } else {
@@ -482,15 +525,25 @@ export class Game {
 
   endRaid(type, title, desc, survived = false) {
     this.state = 'ended';
+    this.inventoryUi?.toggle(false);
     const p = this.player;
+    const lootValue = p.inventory.filter((i) => !i.starter).reduce((s, i) => s + (i.value || 0), 0);
+    const lootCount = p.inventory.filter((i) => !i.starter).length;
     this.endPayload = {
       type,
       title,
       desc,
-      loot: survived ? [...p.inventory] : [],
+      loot: survived ? p.inventory.filter((i) => !i.starter) : [],
+      lootValue,
       kills: p.kills,
       mode: this.raidMode,
       mapId: this.activeMap?.id,
+      saveHint:
+        type === 'extracted'
+          ? `После «В лобби» ${lootCount} предм. попадут в схрон, +${lootValue}₽ на счёт`
+          : type === 'dead'
+            ? 'Рюкзак потерян. Лут остаётся только у убитых Scav (E) и на точках поиска'
+            : 'Рюкзак не сохранён — нужен успешный экстракт',
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
@@ -513,7 +566,23 @@ export class Game {
     this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2));
     this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2));
     const sens = this.settings?.mouseSens ?? 1;
-    this.input.updateWorld(this.camX, this.camY, this.scale, sens);
+    this.input.updateWorld(this.camX, this.camY, this.scale);
+    if (sens !== 1 && this.player) {
+      const p = this.player;
+      const cx = this.canvas.width / 2;
+      const cy = this.canvas.height / 2;
+      const viewCx = this.camX + cx / this.scale;
+      const viewCy = this.camY + cy / this.scale;
+      const trueAngle = Math.atan2(this.input.mouse.worldY - p.y, this.input.mouse.worldX - p.x);
+      const centerAngle = Math.atan2(viewCy - p.y, viewCx - p.x);
+      let delta = trueAngle - centerAngle;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      const clamped = centerAngle + delta * Math.min(2, Math.max(0.5, sens));
+      const aimDist = dist(p.x, p.y, this.input.mouse.worldX, this.input.mouse.worldY);
+      this.input.mouse.worldX = p.x + Math.cos(clamped) * aimDist;
+      this.input.mouse.worldY = p.y + Math.sin(clamped) * aimDist;
+    }
   }
 
   resize() {
@@ -569,6 +638,26 @@ export class Game {
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.fx.drawScreen(ctx, this.canvas.width, this.canvas.height);
+    this.drawCrosshair(ctx);
+  }
+
+  drawCrosshair(ctx) {
+    if (this.state !== 'raid' || this.settingsOpen || !this.player || this.player.dead) return;
+    const mx = this.input.mouse.screenX ?? this.input.mouse.x;
+    const my = this.input.mouse.screenY ?? this.input.mouse.y;
+    ctx.strokeStyle = 'rgba(200, 220, 180, 0.95)';
+    ctx.lineWidth = 1.5;
+    const s = 7;
+    ctx.beginPath();
+    ctx.moveTo(mx - s, my);
+    ctx.lineTo(mx + s, my);
+    ctx.moveTo(mx, my - s);
+    ctx.lineTo(mx, my + s);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(200, 220, 180, 0.85)';
+    ctx.beginPath();
+    ctx.arc(mx, my, 1.5, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   loop(ts) {
@@ -588,7 +677,7 @@ export function createUI() {
   const muteBtn = document.getElementById('btn-mute');
 
   function invCacheKey(p) {
-    return `${p.inventory.length}|${p.selectedSlot}|${p.inventory.map((i) => i?.uid || i?.id).join(',')}`;
+    return `${p.inventory.length}|${p.selectedSlot}|${p.canShoot() ? p.weaponId : '-'}|${p.inventory.map((i) => i?.uid || i?.id).join(',')}`;
   }
 
   return {
@@ -624,10 +713,14 @@ export function createUI() {
       document.getElementById('end-tag').textContent = payload.type === 'extracted' ? '✦ SURVIVED ✦' : payload.type === 'mia' ? 'MIA' : 'KIA';
       document.getElementById('end-title').textContent = payload.title;
       document.getElementById('end-desc').textContent = payload.desc;
+      const saveEl = document.getElementById('end-save');
+      if (saveEl) saveEl.textContent = payload.saveHint || '';
       const lootEl = document.getElementById('end-loot');
       lootEl.innerHTML = payload.loot.length
-        ? payload.loot.map((i) => `<span class="loot-chip">${i.name} (${i.value || 0}₽)</span>`).join('')
-        : '<span class="loot-chip empty">Лут не сохранён</span>';
+        ? payload.loot
+            .map((i) => `<span class="loot-chip">${itemIcon(i)} ${i.name} <b>${i.value || 0}₽</b></span>`)
+            .join('')
+        : '<span class="loot-chip empty">В рюкзаке ничего — ищи E на карте</span>';
       const backBtn = document.getElementById('btn-retry');
       if (backBtn) backBtn.textContent = 'В ЛОББИ';
     },
@@ -649,8 +742,10 @@ export function createUI() {
       document.getElementById('hp-text').textContent = Math.ceil(p.hp);
       document.getElementById('hp-bar').style.width = `${(p.hp / p.maxHp) * 100}%`;
       document.getElementById('extract-bar').style.width = `${(p.extractProgress / EXTRACT_TIME) * 100}%`;
-      document.getElementById('ammo').textContent = `${p.ammo} / ${p.reserve}`;
-      document.getElementById('weapon-name').textContent = p.weaponName || 'ПМ';
+      document.getElementById('ammo').textContent = p.canShoot() ? `${p.ammo} / ${p.reserve}` : '—';
+      document.getElementById('weapon-name').textContent = p.canShoot() ? p.weaponName || '—' : '—';
+      const hintEl = document.getElementById('active-slot-hint');
+      if (hintEl) hintEl.textContent = p.getSlotActionHint();
       document.getElementById('inv-count').textContent = `${p.inventory.length}/${p.maxInv}`;
       const armorEl = document.getElementById('armor-bar');
       const armorText = document.getElementById('armor-text');
@@ -668,11 +763,11 @@ export function createUI() {
           div.className = 'slot' + (item ? ' filled' : '') + (i === p.selectedSlot ? ' selected' : '');
           div.dataset.idx = String(i);
           div.innerHTML = item
-            ? `<span class="slot-num">${i + 1}</span>${item.name.slice(0, 9)}`
-            : `<span class="slot-num">${i + 1}</span>—`;
-          div.title = item ? `${item.name} — Q выбросить` : 'Пустой слот';
+            ? `<span class="slot-num">${i + 1}</span><span class="slot-ico">${itemIcon(item)}</span><span class="slot-name">${item.name.slice(0, 8)}</span>`
+            : `<span class="slot-num">${i + 1}</span><span class="slot-ico">·</span><span class="slot-name">—</span>`;
+          div.title = item ? slotItemHint(item) : 'Пустой слот';
           div.addEventListener('click', () => {
-            p.selectedSlot = i;
+            p.selectSlot(i);
             game._hudCache = '';
           });
           slots.appendChild(div);
