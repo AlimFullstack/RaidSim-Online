@@ -347,10 +347,8 @@ export class Player extends Entity {
     const item = this.getSelectedItem();
     const n = this.selectedSlot + 1;
     const wName = this.equipped.weapon?.name || 'нет оружия';
-    if (!this.canShoot()) {
-      if (!item) return `Слот ${n} пуст · ${wName}`;
-      return `Слот ${n}: ${item.name} · ${wName}`;
-    }
+    if (!item) return `Слот ${n} пуст · ${wName}`;
+    if (!this.canShoot()) return `Слот ${n}: ${item.name} · ${wName}`;
     if (item.heal) return `Слот ${n}: ${item.name} · F лечиться · ${wName} · ЛКМ`;
     if (item.grenade) return `Слот ${n}: ${item.name} · G · ${wName} · ЛКМ`;
     if (item.smoke) return `Слот ${n}: ${item.name} · V · ${wName} · ЛКМ`;
