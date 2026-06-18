@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tarkov Cubes — Raid</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game" width="960" height="720"></canvas>
+
+      <div id="hud" class="hidden">
+        <div class="hud-top">
+          <div class="raid-timer">
+            <span class="label">РЕЙД</span>
+            <span id="timer">12:00</span>
+          </div>
+          <div id="status-msg"></div>
+        </div>
+
+        <div class="hud-bottom">
+          <div class="panel vitals">
+            <div class="bar-wrap">
+              <span>HP</span>
+              <div class="bar"><div id="hp-bar" class="fill hp"></div></div>
+              <span id="hp-text">100</span>
+            </div>
+            <div class="bar-wrap">
+              <span>ЭКСТРАКТ</span>
+              <div class="bar"><div id="extract-bar" class="fill extract"></div></div>
+            </div>
+          </div>
+
+          <div class="panel weapon">
+            <div id="weapon-name">ПМ</div>
+            <div id="ammo">12 / 12</div>
+            <div class="hint">R — перезарядка</div>
+          </div>
+
+          <div class="panel inventory">
+            <div class="inv-title">РЮКЗАК <span id="inv-count">0/6</span></div>
+            <div id="inv-slots" class="inv-slots"></div>
+          </div>
+        </div>
+
+        <div class="controls-hint">
+          WASD — движение · Мышь — прицел · ЛКМ — огонь · E — лут · F — аптечка
+        </div>
+      </div>
+
+      <div id="overlay" class="overlay">
+        <div class="overlay-card">
+          <p class="tag">ESCAPE FROM CUBES</p>
+          <h1>TARKOV CUBES</h1>
+          <p class="subtitle">
+            Рейд на карте 4×4. Собери лут, переживи Scav'ов и выйди через зелёную зону экстракта до конца таймера.
+          </p>
+          <ul class="features">
+            <li>Таймер рейда — 8 минут</li>
+            <li>Укрытия из «кубиков» на карте</li>
+            <li>Лут, патроны, аптечки</li>
+            <li>Смерть = потеря всего лута</li>
+          </ul>
+          <button id="btn-start" class="btn primary">НАЧАТЬ РЕЙД</button>
+          <p class="deploy-note">Статический сайт — деплой папки <code>dist</code> на Netlify / Vercel / GitHub Pages</p>
+        </div>
+      </div>
+
+      <div id="end-screen" class="overlay hidden">
+        <div class="overlay-card end">
+          <p class="tag" id="end-tag">MIA</p>
+          <h1 id="end-title">ТЫ ПОГИБ</h1>
+          <p id="end-desc">Весь лут остался на карте.</p>
+          <div id="end-loot" class="end-loot"></div>
+          <button id="btn-retry" class="btn primary">НОВЫЙ РЕЙД</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
