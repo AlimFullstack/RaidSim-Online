@@ -56,7 +56,7 @@ export function applyRaidResult(profile, result) {
     p.xp += xpGain;
   }
 
-  p.loadout = { extraMedkits: 0, extraAmmo: 0, startArmor: 0, weapon: undefined };
+  p.loadout = { extraMedkits: 0, extraAmmo: 0, startArmor: 0 };
 
   const questResult = evaluateQuest(p, result);
   if (questResult.completed && questResult.quest) {

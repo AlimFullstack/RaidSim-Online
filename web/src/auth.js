@@ -10,6 +10,7 @@ import {
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import { firebaseConfig, isFirebaseConfigured } from './firebase-config.js';
 import { createDefaultProfile } from './profile.js';
+import { normalizeQuestRef } from './quests.js';
 
 let app = null;
 let auth = null;
@@ -23,12 +24,66 @@ function ensureFirebase() {
     auth = getAuth(app);
     db = getFirestore(app);
     if (typeof window !== 'undefined') {
-      isSupported().then((ok) => {
-        if (ok) analytics = getAnalytics(app);
-      });
+      isSupported()
+        .then((ok) => {
+          if (ok) {
+            try {
+              analytics = getAnalytics(app);
+            } catch {
+              /* blocked by adblock / network */
+            }
+          }
+        })
+        .catch(() => {});
     }
   }
   return true;
+}
+
+function stripUndefined(obj) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripUndefined);
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined) continue;
+    out[k] = stripUndefined(v);
+  }
+  return out;
+}
+
+/** Prepare profile for Firestore — no client-only fields, no functions. */
+export function serializeProfile(profile) {
+  const { isGuest, ...rest } = profile;
+  const data = stripUndefined({
+    ...rest,
+    quests: {
+      completed: profile.quests?.completed || [],
+      active: normalizeQuestRef(profile.quests?.active),
+    },
+    loadout: {
+      extraMedkits: profile.loadout?.extraMedkits || 0,
+      extraAmmo: profile.loadout?.extraAmmo || 0,
+      startArmor: profile.loadout?.startArmor || 0,
+      ...(profile.loadout?.weapon ? { weapon: profile.loadout.weapon } : {}),
+    },
+  });
+  return data;
+}
+
+function hydrateProfile(data, user) {
+  const base = createDefaultProfile();
+  const quests = data.quests || base.quests;
+  return {
+    ...base,
+    ...data,
+    isGuest: false,
+    displayName: data.displayName || user.displayName,
+    photoURL: data.photoURL || user.photoURL,
+    quests: {
+      completed: quests.completed || [],
+      active: normalizeQuestRef(quests.active),
+    },
+  };
 }
 
 export class AuthService {
@@ -135,14 +190,7 @@ export class ProfileStorage {
     const snap = await getDoc(ref);
 
     if (snap.exists()) {
-      const data = snap.data();
-      return {
-        ...createDefaultProfile(),
-        ...data,
-        isGuest: false,
-        displayName: data.displayName || this.auth.user.displayName,
-        photoURL: data.photoURL || this.auth.user.photoURL,
-      };
+      return hydrateProfile(snap.data(), this.auth.user);
     }
 
     const fresh = createDefaultProfile({
@@ -151,30 +199,42 @@ export class ProfileStorage {
       photoURL: this.auth.user.photoURL,
       email: this.auth.user.email,
     });
-    await this.save(fresh);
+    const saved = await this.save(fresh);
+    if (!saved.ok) console.error('Profile save failed:', saved.msg);
     return fresh;
   }
 
+  /** @returns {Promise<{ ok: boolean, msg?: string }>} */
   async save(profile) {
     if (this.auth.isGuest()) {
       this.auth.guestProfile = profile;
-      return;
+      return { ok: true };
     }
 
-    if (!this.auth.isLoggedIn() || !ensureFirebase()) return;
+    if (!this.auth.isLoggedIn() || !ensureFirebase()) {
+      return { ok: false, msg: 'Не авторизован' };
+    }
 
     const uid = this.auth.user.uid;
     const ref = doc(db, 'users', uid);
-    await setDoc(
-      ref,
-      {
-        ...profile,
-        displayName: profile.displayName || this.auth.user.displayName,
-        photoURL: profile.photoURL || this.auth.user.photoURL,
-        email: this.auth.user.email,
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
+    const payload = serializeProfile({
+      ...profile,
+      displayName: profile.displayName || this.auth.user.displayName,
+      photoURL: profile.photoURL || this.auth.user.photoURL,
+      email: this.auth.user.email,
+      updatedAt: Date.now(),
+    });
+
+    try {
+      await setDoc(ref, payload, { merge: true });
+      return { ok: true };
+    } catch (e) {
+      console.error('Firestore save error:', e);
+      const msg =
+        e.code === 'permission-denied'
+          ? 'Нет доступа к Firestore. Проверьте правила в Firebase Console.'
+          : e.message || 'Ошибка сохранения';
+      return { ok: false, msg };
+    }
   }
 }

@@ -36,10 +36,29 @@ export const QUEST_POOL = [
   },
 ];
 
+/** Serializable quest reference for Firestore (no functions). */
+export function toQuestRef(quest) {
+  if (!quest) return null;
+  return { id: quest.id, title: quest.title, desc: quest.desc };
+}
+
+/** Normalize quest from Firestore — strip legacy check/reward fields. */
+export function normalizeQuestRef(raw) {
+  if (!raw?.id) return null;
+  const def = QUEST_POOL.find((d) => d.id === raw.id);
+  return {
+    id: raw.id,
+    title: raw.title || def?.title || raw.id,
+    desc: raw.desc || def?.desc || '',
+  };
+}
+
 export function pickRandomQuest(completed = []) {
   const available = QUEST_POOL.filter((q) => !completed.includes(q.id));
-  if (!available.length) return QUEST_POOL[Math.floor(Math.random() * QUEST_POOL.length)];
-  return available[Math.floor(Math.random() * available.length)];
+  const pick = available.length
+    ? available[Math.floor(Math.random() * available.length)]
+    : QUEST_POOL[Math.floor(Math.random() * QUEST_POOL.length)];
+  return toQuestRef(pick);
 }
 
 export function evaluateQuest(profile, result) {

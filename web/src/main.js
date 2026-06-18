@@ -19,15 +19,34 @@ const storage = new ProfileStorage(auth);
 const game = new Game(canvas, ui, confetti, audio, fx);
 
 let lobby = null;
+let audioUnlockBound = false;
+
+function preferredMusicTrack() {
+  if (game.state === 'raid') return 'raid';
+  return 'lobby';
+}
+
+function bindAudioUnlock() {
+  if (audioUnlockBound) return;
+  audioUnlockBound = true;
+
+  const unlock = () => {
+    audio.unlock(preferredMusicTrack());
+  };
+
+  const opts = { once: true, passive: true };
+  document.addEventListener('pointerdown', unlock, opts);
+  document.addEventListener('keydown', unlock, opts);
+}
 
 async function boot() {
-  audio.init();
-  audio.startMusic('lobby');
+  bindAudioUnlock();
 
   lobby = new Lobby(auth, storage, {
     audio,
+    unlockAudio: () => audio.unlock(preferredMusicTrack()),
     onPlay(mode, loadout, mapId) {
-      audio.init();
+      audio.unlock('raid');
       festiveBg.setActive(false);
       game.startRaid(mode, loadout, mapId);
     },
@@ -53,16 +72,14 @@ document.getElementById('btn-retry')?.addEventListener('click', async () => {
   ui.hideEnd();
   festiveBg.setActive(true);
   game.state = 'menu';
-  audio.init();
-  audio.startMusic('lobby');
+  audio.unlock('lobby');
 });
 
-document.getElementById('btn-mute')?.addEventListener('click', () => {
-  audio.init();
+document.getElementById('btn-mute')?.addEventListener('click', async () => {
+  await audio.unlock(preferredMusicTrack());
   const muted = audio.toggleMute();
   ui.updateMuteButton(muted);
-  if (!muted && game.state === 'raid') audio.startMusic('raid');
-  else if (!muted && game.state !== 'raid') audio.startMusic('lobby');
+  if (!muted) audio.startMusic(preferredMusicTrack());
 });
 
 window.addEventListener('resize', () => game.resize());

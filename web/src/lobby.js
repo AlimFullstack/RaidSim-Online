@@ -38,6 +38,17 @@ export class Lobby {
     this.renderShop();
   }
 
+  async persistProfile(successMsg = 'Прогресс сохранён в облаке') {
+    if (this.auth.isGuest()) return { ok: true };
+    const r = await this.storage.save(this.profile);
+    if (r.ok) {
+      if (successMsg) this.flash(successMsg);
+    } else {
+      this.flash(r.msg || 'Ошибка сохранения');
+    }
+    return r;
+  }
+
   renderMaps() {
     if (!this.el.mapList) return;
     this.el.mapList.innerHTML = getMapList()
@@ -58,8 +69,8 @@ export class Lobby {
   }
 
   bindEvents() {
-    const uiClick = () => {
-      this.audio?.init();
+    const uiClick = async () => {
+      await this.callbacks.unlockAudio?.();
       this.audio?.play('uiClick');
     };
     document.getElementById('btn-guest')?.addEventListener('click', () => { uiClick(); this.enterGuest(); });
@@ -123,10 +134,9 @@ export class Lobby {
           return;
         }
         this.profile = r.profile;
-        await this.storage.save(this.profile);
+        await this.persistProfile(r.msg);
         this.render();
         this.renderShop();
-        this.flash(r.msg);
       });
     });
   }
@@ -146,7 +156,7 @@ export class Lobby {
       this.profile = await this.storage.load();
       if (!this.profile.quests?.active) {
         this.profile.quests = { active: pickRandomQuest(this.profile.quests?.completed || []), completed: this.profile.quests?.completed || [] };
-        await this.storage.save(this.profile);
+        await this.persistProfile(null);
       }
       this.showLobby();
     } catch (e) {
@@ -183,8 +193,7 @@ export class Lobby {
       this.flash('Квест выполнен!');
     }
     if (!this.auth.isGuest()) {
-      await this.storage.save(this.profile);
-      this.flash('Прогресс сохранён в облаке');
+      await this.persistProfile('Прогресс сохранён в облаке');
     } else {
       this.flash('Гость: прогресс не сохранится при обновлении страницы');
     }
@@ -258,7 +267,7 @@ export class Lobby {
         const r = sellStashItem(this.profile, Number(btn.dataset.idx));
         if (!r.ok) return;
         this.profile = r.profile;
-        await this.storage.save(this.profile);
+        await this.persistProfile(null);
         this.renderStash();
         this.render();
       });

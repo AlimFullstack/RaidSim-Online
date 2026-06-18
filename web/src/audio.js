@@ -12,18 +12,34 @@ export class AudioManager {
     this.musicNodes = [];
     this.musicTimer = null;
     this.footstepTimer = 0;
+    this.unlocked = false;
   }
 
   init() {
     if (this.ctx) return;
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-
     this.musicGain = this.ctx.createGain();
     this.sfxGain = this.ctx.createGain();
     this.musicGain.connect(this.ctx.destination);
     this.sfxGain.connect(this.ctx.destination);
     this._applyVolumes();
+  }
+
+  /** Call after user gesture — resumes AudioContext and starts lobby music. */
+  async unlock(preferredTrack = 'lobby') {
+    this.init();
+    if (this.ctx?.state === 'suspended') {
+      await this.ctx.resume();
+    }
+    if (!this.unlocked) {
+      this.unlocked = true;
+      if (!this.muted) this.startMusic(preferredTrack);
+    }
+    return this.unlocked;
+  }
+
+  isUnlocked() {
+    return this.unlocked;
   }
 
   _applyVolumes() {
@@ -56,7 +72,7 @@ export class AudioManager {
   }
 
   startMusic(track = 'lobby') {
-    if (!this.ctx) return;
+    if (!this.ctx || !this.unlocked) return;
     if (this.currentTrack === track) return;
     this.stopMusic();
     this.currentTrack = track;

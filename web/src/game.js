@@ -56,8 +56,7 @@ export class Game {
   }
 
   async startRaid(mode = 'standard', loadout = {}, mapId = 'factory') {
-    this.audio?.init();
-    this.audio?.startMusic('raid');
+    this.audio?.unlock('raid');
     this.fx.clear();
     this.raidMode = mode;
     const modeConfig = RAID_MODES[mode] || RAID_MODES.standard;
