@@ -51,6 +51,7 @@ export class Game {
     this.ui.showHud();
     this.ui.hideOverlay();
     this.ui.hideEnd();
+    this.resize();
   }
 
   setStatus(msg, duration = 2) {
@@ -202,6 +203,7 @@ export class Game {
   }
 
   updateCamera() {
+    if (!this.player) return;
     const viewW = this.canvas.width / this.scale;
     const viewH = this.canvas.height / this.scale;
     this.camX = Math.max(0, Math.min(MAP_W - viewW, this.player.x - viewW / 2));
@@ -215,7 +217,7 @@ export class Game {
     this.scale = Math.min(maxW / MAP_W, maxH / MAP_H, 1.2);
     this.canvas.width = Math.floor(MAP_W * this.scale);
     this.canvas.height = Math.floor(MAP_H * this.scale);
-    this.updateCamera();
+    if (this.player) this.updateCamera();
   }
 
   draw() {
