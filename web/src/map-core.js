@@ -44,7 +44,7 @@ export const LOOT_TABLE = {
   normal: [
     { id: 'empty', name: 'Пусто', weight: 2, value: 0 },
     { id: 'coin', name: 'Монета', weight: 3, value: 1 },
-    { id: 'ammo', name: 'Патроны', weight: 3, value: 0, ammo: 12 },
+    { id: 'ammo', name: 'Патроны', weight: 3, value: 0, ammo: 18 },
     { id: 'bandage', name: 'Бинт', weight: 2, value: 0, heal: 25 },
     { id: 'food', name: 'Еда', weight: 2, value: 1 },
     { id: 'bolt', name: 'Болт', weight: 2, value: 2 },
@@ -53,11 +53,12 @@ export const LOOT_TABLE = {
     { id: 'smoke', name: 'Дымовая', weight: 1, value: 6, consumable: true, smoke: true },
   ],
   valuable: [
-    { id: 'ammo2', name: 'Патроны x2', weight: 2, value: 0, ammo: 24 },
+    { id: 'ammo2', name: 'Патроны x2', weight: 2, value: 0, ammo: 36 },
     { id: 'medkit', name: 'Аптечка', weight: 3, value: 0, heal: 50, consumable: true },
     { id: 'armor', name: 'Бронежилет', weight: 2, value: 8, armor: 25 },
     { id: 'shotgun', name: 'Дробовик', weight: 2, value: 12, weapon: 'shotgun' },
     { id: 'ak', name: 'АК-74', weight: 1, value: 20, weapon: 'ak' },
+    { id: 'pp', name: 'ПП-91', weight: 2, value: 28, weapon: 'pp' },
     { id: 'chain', name: 'Золотая цепь', weight: 2, value: 10 },
     { id: 'gpu', name: 'Видеокарта', weight: 1, value: 15 },
     { id: 'key', name: 'Ключ', weight: 1, value: 6 },

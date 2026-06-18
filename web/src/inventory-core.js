@@ -182,7 +182,7 @@ export function migrateProfile(profile) {
   };
 
   if (old.weapon && old.weapon !== 'pm') {
-    const names = { shotgun: 'Дробовик', ak: 'АК-74' };
+    const names = { shotgun: 'Дробовик', ak: 'АК-74', pp: 'ПП-91', pm: 'ПМ' };
     tryAdd({
       id: old.weapon,
       name: names[old.weapon] || old.weapon,
@@ -197,9 +197,9 @@ export function migrateProfile(profile) {
   }
 
   if (old.extraAmmo) {
-    tryAdd({ id: 'ammo', name: 'Патроны', ammo: 12, value: 0, count: 1 });
-    if (old.extraAmmo > 12) {
-      tryAdd({ id: 'ammo', name: 'Патроны', ammo: old.extraAmmo - 12, value: 0, count: 1 });
+    tryAdd({ id: 'ammo', name: 'Патроны', ammo: 18, value: 0, count: 1 });
+    if (old.extraAmmo > 18) {
+      tryAdd({ id: 'ammo', name: 'Патроны', ammo: old.extraAmmo - 18, value: 0, count: 1 });
     }
   }
 

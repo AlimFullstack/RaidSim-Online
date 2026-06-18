@@ -277,7 +277,7 @@ export class Player extends Entity {
   constructor(x, y, walls = [], weaponId = 'pm') {
     super(x, y, 16, walls);
     this.equipWeapon(weaponId);
-    this.reserve = 24;
+    this.reserve = 36;
     this.fireCooldown = 0;
     this.reloadTime = 0;
     this.backpack = emptyBackpack();
@@ -718,6 +718,13 @@ export class Player extends Entity {
       ctx.fillRect(8, -6, 8, 3);
       ctx.fillStyle = '#8b7355';
       ctx.fillRect(-2, -2, 8, 4);
+    } else if (id === 'pp') {
+      ctx.fillStyle = '#2a2820';
+      ctx.fillRect(6, -3, 16, 6);
+      ctx.fillStyle = '#4a4438';
+      ctx.fillRect(20, -2, 10, 4);
+      ctx.fillStyle = '#6a6050';
+      ctx.fillRect(2, -2, 8, 4);
     } else if (id === 'shotgun') {
       ctx.fillStyle = '#2c2418';
       ctx.fillRect(2, -5, 20, 10);

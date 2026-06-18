@@ -16,7 +16,7 @@ import { emptyBackpack, cloneBackpack } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
 
-const SHOP_ICONS = { medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
+const SHOP_ICONS = { pm: '🔫', pp: '🔫', medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
 const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
 
 export class Lobby {

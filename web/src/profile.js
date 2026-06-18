@@ -14,11 +14,13 @@ export const RAID_MODES = {
 };
 
 export const SHOP_ITEMS = [
-  { id: 'medkit', name: 'Аптечка', cost: 50, item: { id: 'medkit', name: 'Аптечка', heal: 50, consumable: true, value: 0 } },
-  { id: 'ammo', name: 'Патроны +12', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 12, value: 0 } },
-  { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 25, value: 8 } },
+  { id: 'pm', name: 'ПМ', cost: 5, item: { id: 'pm_shop', name: 'ПМ', weapon: 'pm', value: 1 } },
+  { id: 'pp', name: 'ПП-91', cost: 240, item: { id: 'pp', name: 'ПП-91', weapon: 'pp', value: 28 } },
   { id: 'shotgun', name: 'Дробовик', cost: 180, item: { id: 'shotgun', name: 'Дробовик', weapon: 'shotgun', value: 12 } },
   { id: 'ak', name: 'АК-74', cost: 350, item: { id: 'ak', name: 'АК-74', weapon: 'ak', value: 20 } },
+  { id: 'ammo', name: 'Патроны +18', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 18, value: 0 } },
+  { id: 'medkit', name: 'Аптечка', cost: 50, item: { id: 'medkit', name: 'Аптечка', heal: 50, consumable: true, value: 0 } },
+  { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 25, value: 8 } },
 ];
 
 export function xpToLevel(xp) {

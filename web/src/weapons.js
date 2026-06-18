@@ -1,13 +1,17 @@
+/** Базовый разброс при ходьбе ≈ полуугол фонарика (попасть почти нереально) */
+const WALK_SPREAD = 0.62;
+const SPRINT_SPREAD = 0.78;
+
 export const WEAPONS = {
   pm: {
     id: 'pm',
     name: 'ПМ',
-    magSize: 12,
+    magSize: 18,
     damage: 22,
     fireRate: 0.38,
     spread: 0.018,
-    moveSpread: 0.08,
-    sprintSpread: 0.2,
+    moveSpread: WALK_SPREAD,
+    sprintSpread: SPRINT_SPREAD,
     pellets: 1,
     range: 9999,
     semiAuto: true,
@@ -19,15 +23,35 @@ export const WEAPONS = {
     muzzleColor: '#fff4c8',
     tracerColor: '#f5e6a8',
   },
+  pp: {
+    id: 'pp',
+    name: 'ПП-91',
+    magSize: 30,
+    damage: 14,
+    fireRate: 0.065,
+    spread: 0.048,
+    moveSpread: WALK_SPREAD,
+    sprintSpread: SPRINT_SPREAD,
+    pellets: 1,
+    range: 9999,
+    semiAuto: false,
+    standToFire: false,
+    bulletSpeed: 680,
+    bulletSize: 2.8,
+    recoilKick: 4,
+    reloadTime: 1.8,
+    muzzleColor: '#ffe08a',
+    tracerColor: '#ffd866',
+  },
   shotgun: {
     id: 'shotgun',
     name: 'Дробовик',
-    magSize: 4,
+    magSize: 6,
     damage: 12,
     fireRate: 0.9,
     spread: 0.2,
-    moveSpread: 0.1,
-    sprintSpread: 0.22,
+    moveSpread: WALK_SPREAD,
+    sprintSpread: SPRINT_SPREAD,
     pellets: 6,
     range: 240,
     semiAuto: true,
@@ -42,12 +66,12 @@ export const WEAPONS = {
   ak: {
     id: 'ak',
     name: 'АК-74',
-    magSize: 30,
+    magSize: 45,
     damage: 20,
     fireRate: 0.095,
     spread: 0.042,
-    moveSpread: 0.06,
-    sprintSpread: 0.14,
+    moveSpread: WALK_SPREAD,
+    sprintSpread: SPRINT_SPREAD,
     pellets: 1,
     range: 9999,
     semiAuto: false,
@@ -69,8 +93,8 @@ export function getWeapon(id) {
 /** Total spread angle (radians) from weapon + movement + recoil */
 export function calcSpread(weapon, { moving, sprinting, recoilHeat = 0 }) {
   let s = weapon.spread || 0;
-  if (moving) s += weapon.moveSpread || 0.05;
-  if (sprinting) s += weapon.sprintSpread || 0.1;
+  if (moving) s += weapon.moveSpread || WALK_SPREAD;
+  if (sprinting) s += weapon.sprintSpread || SPRINT_SPREAD;
   s += recoilHeat * (weapon.semiAuto ? 0.04 : 0.03);
   return s;
 }
@@ -78,5 +102,6 @@ export function calcSpread(weapon, { moving, sprinting, recoilHeat = 0 }) {
 export function getMuzzleOffset(weaponId) {
   if (weaponId === 'shotgun') return { x: 26, y: 0 };
   if (weaponId === 'ak') return { x: 30, y: 0 };
+  if (weaponId === 'pp') return { x: 24, y: 0 };
   return { x: 22, y: 0 };
 }
