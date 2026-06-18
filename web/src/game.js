@@ -13,7 +13,7 @@ import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint } from './visibility.js';
+import { canSeePoint, buildVisionTheme } from './visibility.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
@@ -338,7 +338,14 @@ export class Game {
   canSee(wx, wy) {
     const p = this.player;
     if (!p || p.dead || !this.activeMap) return false;
-    const theme = getMapTheme(this.activeMap.theme);
+    const viewW = this.canvas.width / this.scale;
+    const viewH = this.canvas.height / this.scale;
+    const theme = buildVisionTheme(
+      getMapTheme(this.activeMap.theme),
+      viewW,
+      viewH,
+      p.hp / p.maxHp
+    );
     return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme);
   }
 
@@ -668,6 +675,7 @@ export class Game {
       raid: this.state === 'raid',
       time: this.animTime,
       fogTint: this.activeMap ? getMapTheme(this.activeMap.theme).fogTint : null,
+      hpRatio: this.player ? this.player.hp / this.player.maxHp : 1,
     });
     this.drawCrosshair(ctx);
   }

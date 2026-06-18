@@ -1,5 +1,5 @@
 import { getMapTheme } from './map-atmosphere.js';
-import { computeVisionPolygon, fillVisionPolygon } from './visibility.js';
+import { computeVisionPolygon, fillVisionPolygon, buildVisionTheme } from './visibility.js';
 
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
@@ -433,13 +433,18 @@ export class GameFx {
     const p = game.player;
     if (!p || p.dead || game.state !== 'raid') return;
 
-    const theme = getMapTheme(game.activeMap?.theme);
-    const walls = game.activeMap?.walls || [];
     const viewW = game.canvas.width / game.scale;
     const viewH = game.canvas.height / game.scale;
     const camX = game.camRenderX ?? game.camX;
     const camY = game.camRenderY ?? game.camY;
+    const walls = game.activeMap?.walls || [];
 
+    const theme = buildVisionTheme(
+      getMapTheme(game.activeMap?.theme),
+      viewW,
+      viewH,
+      p.hp / p.maxHp
+    );
     const visionPoly = computeVisionPolygon(p.x, p.y, p.angle, walls, theme);
 
     ctx.save();
@@ -452,18 +457,35 @@ export class GameFx {
 
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = theme.fogTint;
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.1;
     ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
     ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  drawRaidVignette(ctx, w, h) {
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.12, w / 2, h / 2, Math.max(w, h) * 0.62);
+  drawCriticalHpPulse(ctx, w, h, time = 0) {
+    const pulse = 0.5 + 0.45 * Math.sin(time * 7);
+    const pad = Math.max(w, h) * 0.08;
+    ctx.save();
+    ctx.strokeStyle = `rgba(220, 40, 40, ${pulse})`;
+    ctx.lineWidth = Math.max(10, pad * 0.35);
+    ctx.strokeRect(pad * 0.5, pad * 0.5, w - pad, h - pad);
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.5, 'rgba(0,0,0,0.22)');
-    g.addColorStop(0.82, 'rgba(0,0,0,0.48)');
-    g.addColorStop(1, 'rgba(0,0,0,0.62)');
+    g.addColorStop(0.72, 'rgba(0,0,0,0)');
+    g.addColorStop(0.9, `rgba(160, 20, 20, ${pulse * 0.45})`);
+    g.addColorStop(1, `rgba(200, 30, 30, ${pulse * 0.75})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  drawRaidVignette(ctx, w, h, light = false) {
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.78);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.65, light ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.1)');
+    g.addColorStop(0.88, light ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.22)');
+    g.addColorStop(1, light ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.32)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
@@ -505,7 +527,9 @@ export class GameFx {
     }
 
     if (opts.raid) {
-      this.drawRaidVignette(ctx, w, h);
+      const critical = (opts.hpRatio ?? 1) < 0.2;
+      this.drawRaidVignette(ctx, w, h, !critical);
+      if (critical) this.drawCriticalHpPulse(ctx, w, h, opts.time || 0);
       this.drawFilmGrain(ctx, w, h, opts.time || 0);
       if (opts.fogTint) {
         ctx.fillStyle = opts.fogTint;
