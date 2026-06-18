@@ -62,7 +62,7 @@ export class RaidInventoryUI {
       } else if (eq && eq.dataset.equipType) {
         const type = eq.dataset.equipType;
         const item = this.game.player?.equipped?.[type];
-        if (!item || (type === 'weapon' && item.starter)) {
+        if (!item) {
           e.preventDefault();
           return;
         }
@@ -146,7 +146,7 @@ export class RaidInventoryUI {
   }
 
   renderEquipSlot(type, item, label) {
-    const canDrag = item && !(type === 'weapon' && item.starter);
+    const canDrag = !!item;
     return `
       <div class="inv-slot equip-slot ${item ? 'filled' : ''}"
            data-raid-drop="${type}"

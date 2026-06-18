@@ -2,6 +2,8 @@ import { evaluateQuest, applyQuestReward, pickRandomQuest } from './quests.js';
 import {
   addToStash,
   emptyBackpack,
+  emptyEquipped,
+  cloneEquipped,
   stackItems,
   lootTotalValue,
   ensureMigratedProfile,
@@ -43,9 +45,9 @@ export function createDefaultProfile(overrides = {}) {
     photoURL: null,
     isGuest: true,
     xp: 0,
-    rubles: 0,
+    rubles: 20,
     stash: { items: [] },
-    loadout: { backpack: emptyBackpack() },
+    loadout: { backpack: emptyBackpack(), equipped: emptyEquipped() },
     stats: { raids: 0, extracts: 0, kills: 0, totalLootValue: 0 },
     quests: { active: null, completed: [] },
     hideout: { level: 1 },
@@ -57,7 +59,7 @@ export function applyRaidResult(profile, result) {
   let p = ensureMigratedProfile({
     ...profile,
     stash: { items: [...profile.stash.items] },
-    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())] },
+    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())], equipped: cloneEquipped(profile.loadout?.equipped || {}) },
     stats: { ...profile.stats },
     quests: { ...profile.quests },
   });

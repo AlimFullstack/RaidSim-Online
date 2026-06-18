@@ -36,6 +36,34 @@ export function emptyBackpack() {
   return [null, null, null, null];
 }
 
+export function emptyEquipped() {
+  return { weapon: null, armor: null };
+}
+
+function cloneLoadoutProfile(profile) {
+  const ld = profile.loadout || {};
+  const bp = [...(ld.backpack || emptyBackpack())];
+  while (bp.length < BACKPACK_SIZE) bp.push(null);
+  return {
+    ...profile,
+    stash: { items: [...(profile.stash?.items || [])] },
+    loadout: {
+      backpack: bp.slice(0, BACKPACK_SIZE),
+      equipped: {
+        weapon: ld.equipped?.weapon ? cloneItem(ld.equipped.weapon) : null,
+        armor: ld.equipped?.armor ? cloneItem(ld.equipped.armor) : null,
+      },
+    },
+  };
+}
+
+export function cloneEquipped(equipped = {}) {
+  return {
+    weapon: equipped.weapon ? cloneItem(equipped.weapon) : null,
+    armor: equipped.armor ? cloneItem(equipped.armor) : null,
+  };
+}
+
 /** @param {(object|null)[]} slots */
 export function backpackUsed(slots) {
   return slots.filter(Boolean).length;
@@ -109,13 +137,7 @@ export function moveStashToLoadout(profile, stashIdx, loadoutIdx, count = 1) {
   if (loadoutIdx < 0 || loadoutIdx >= BACKPACK_SIZE) {
     return { ok: false, msg: 'Неверный слот' };
   }
-  const p = {
-    ...profile,
-    stash: { items: [...profile.stash.items] },
-    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())] },
-  };
-  while (p.loadout.backpack.length < BACKPACK_SIZE) p.loadout.backpack.push(null);
-
+  const p = cloneLoadoutProfile(profile);
   const removed = removeFromStash(p.stash, stashIdx, count);
   if (!removed.ok || !removed.item) return removed;
 
@@ -133,19 +155,110 @@ export function moveStashToLoadout(profile, stashIdx, loadoutIdx, count = 1) {
 
 /** @param {object} profile @param {number} loadoutIdx @param {number} [count] */
 export function moveLoadoutToStash(profile, loadoutIdx, count = 1) {
-  const p = {
-    ...profile,
-    stash: { items: [...profile.stash.items] },
-    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())] },
-  };
-  while (p.loadout.backpack.length < BACKPACK_SIZE) p.loadout.backpack.push(null);
+  const p = cloneLoadoutProfile(profile);
 
   const removed = removeFromBackpack(p.loadout.backpack, loadoutIdx, count);
   if (!removed.ok || !removed.item) return removed;
 
   const added = addToStash(p.stash, removed.item, removed.item.count);
-  if (!added.ok) return { ok: false, msg: added.msg };
+  if (!added.ok) {
+    addToBackpack(p.loadout.backpack, removed.item, removed.item.count);
+    return { ok: false, msg: added.msg };
+  }
   return { ok: true, profile: p, msg: `В схрон: ${removed.item.name}` };
+}
+
+function lobbyEquipFromStash(profile, stashIdx, equipType, check) {
+  const p = cloneLoadoutProfile(profile);
+  const peek = p.stash.items[stashIdx];
+  if (!peek || !check(peek)) return { ok: false, msg: equipType === 'weapon' ? 'Не оружие' : 'Не броня' };
+  const removed = removeFromStash(p.stash, stashIdx, 1);
+  if (!removed.ok || !removed.item) return removed;
+  const old = p.loadout.equipped[equipType];
+  if (old) {
+    const added = addToStash(p.stash, old, 1);
+    if (!added.ok) {
+      addToStash(p.stash, removed.item, 1);
+      return { ok: false, msg: added.msg };
+    }
+  }
+  p.loadout.equipped[equipType] = removed.item;
+  const label = equipType === 'weapon' ? 'Оружие' : 'Броня';
+  return { ok: true, profile: p, msg: `${label}: ${removed.item.name}` };
+}
+
+export function lobbyEquipWeaponFromStash(profile, stashIdx) {
+  return lobbyEquipFromStash(profile, stashIdx, 'weapon', (i) => i.weapon);
+}
+
+export function lobbyEquipArmorFromStash(profile, stashIdx) {
+  return lobbyEquipFromStash(profile, stashIdx, 'armor', (i) => i.armor);
+}
+
+export function lobbyEquipWeapon(profile, backpackIdx) {
+  const p = cloneLoadoutProfile(profile);
+  const item = p.loadout.backpack[backpackIdx];
+  if (!item?.weapon) return { ok: false, msg: 'Не оружие' };
+  const removed = removeFromBackpack(p.loadout.backpack, backpackIdx, 1);
+  if (!removed.ok || !removed.item) return removed;
+  const old = p.loadout.equipped.weapon;
+  if (old) {
+    const added = addToBackpack(p.loadout.backpack, old, 1);
+    if (!added.ok) {
+      p.loadout.backpack[backpackIdx] = removed.item;
+      return { ok: false, msg: 'Рюкзак полон — освободи место' };
+    }
+  }
+  p.loadout.equipped.weapon = removed.item;
+  return { ok: true, profile: p, msg: `Оружие: ${removed.item.name}` };
+}
+
+export function lobbyEquipArmor(profile, backpackIdx) {
+  const p = cloneLoadoutProfile(profile);
+  const item = p.loadout.backpack[backpackIdx];
+  if (!item?.armor) return { ok: false, msg: 'Не броня' };
+  const removed = removeFromBackpack(p.loadout.backpack, backpackIdx, 1);
+  if (!removed.ok || !removed.item) return removed;
+  const old = p.loadout.equipped.armor;
+  if (old) {
+    const added = addToBackpack(p.loadout.backpack, old, 1);
+    if (!added.ok) {
+      p.loadout.backpack[backpackIdx] = removed.item;
+      return { ok: false, msg: 'Рюкзак полон' };
+    }
+  }
+  p.loadout.equipped.armor = removed.item;
+  return { ok: true, profile: p, msg: `Броня: ${removed.item.name}` };
+}
+
+export function lobbyUnequipWeapon(profile, backpackIdx) {
+  const p = cloneLoadoutProfile(profile);
+  const weapon = p.loadout.equipped.weapon;
+  if (!weapon) return { ok: false, msg: 'Нет оружия' };
+  if (p.loadout.backpack[backpackIdx]) return { ok: false, msg: 'Слот занят' };
+  p.loadout.backpack[backpackIdx] = cloneItem(weapon);
+  p.loadout.equipped.weapon = null;
+  return { ok: true, profile: p, msg: 'Оружие в рюкзак' };
+}
+
+export function lobbyUnequipArmor(profile, backpackIdx) {
+  const p = cloneLoadoutProfile(profile);
+  const armor = p.loadout.equipped.armor;
+  if (!armor) return { ok: false, msg: 'Нет брони' };
+  if (p.loadout.backpack[backpackIdx]) return { ok: false, msg: 'Слот занят' };
+  p.loadout.backpack[backpackIdx] = cloneItem(armor);
+  p.loadout.equipped.armor = null;
+  return { ok: true, profile: p, msg: 'Броня в рюкзак' };
+}
+
+export function lobbyEquipToStash(profile, equipType) {
+  const p = cloneLoadoutProfile(profile);
+  const item = p.loadout.equipped[equipType];
+  if (!item) return { ok: false, msg: 'Слот пуст' };
+  const added = addToStash(p.stash, item, 1);
+  if (!added.ok) return { ok: false, msg: added.msg };
+  p.loadout.equipped[equipType] = null;
+  return { ok: true, profile: p, msg: `В схрон: ${item.name}` };
 }
 
 /** @param {object[]} items */
@@ -170,7 +283,7 @@ export function migrateProfile(profile) {
   const p = {
     ...profile,
     stash: { items: stackItems(profile.stash?.items || []) },
-    loadout: { backpack: emptyBackpack() },
+    loadout: { backpack: emptyBackpack(), equipped: emptyEquipped() },
   };
 
   const old = profile.loadout || {};
@@ -231,7 +344,10 @@ export function ensureMigratedProfile(profile) {
     return {
       ...profile,
       stash: { items: stackItems(profile.stash?.items || []) },
-      loadout: { backpack: bp.slice(0, BACKPACK_SIZE) },
+      loadout: {
+        backpack: bp.slice(0, BACKPACK_SIZE),
+        equipped: ld.equipped ? cloneEquipped(ld.equipped) : emptyEquipped(),
+      },
     };
   }
 
@@ -242,26 +358,30 @@ export function ensureMigratedProfile(profile) {
   return {
     ...profile,
     stash: { items: stackItems(profile.stash?.items || []) },
-    loadout: { backpack: emptyBackpack() },
+    loadout: { backpack: emptyBackpack(), equipped: emptyEquipped() },
   };
 }
 
-/** @param {object} profile — removes taken loadout items on raid start */
+/** @param {{ backpack?: (object|null)[], equipped?: { weapon?: object|null, armor?: object|null } }} loadout */
+export function loadoutHasWeapon(loadout) {
+  if (loadout?.equipped?.weapon) return true;
+  return (loadout?.backpack || []).some((i) => i?.weapon);
+}
+
 export function consumeLoadoutForRaid(profile) {
-  const p = {
+  return {
     ...profile,
-    loadout: { backpack: emptyBackpack() },
+    loadout: { backpack: emptyBackpack(), equipped: emptyEquipped() },
   };
-  return p;
 }
 
 /** @param {(object|null)[]} backpack @param {{ weapon: object|null, armor: object|null }} equipped */
 export function collectRaidLoot(backpack, equipped) {
   const loot = [];
   for (const item of backpack) {
-    if (item && !item.starter) loot.push(cloneItem(item));
+    if (item) loot.push(cloneItem(item));
   }
-  if (equipped.weapon && !equipped.weapon.starter) loot.push(cloneItem(equipped.weapon));
+  if (equipped.weapon) loot.push(cloneItem(equipped.weapon));
   if (equipped.armor) loot.push(cloneItem(equipped.armor));
   return loot;
 }

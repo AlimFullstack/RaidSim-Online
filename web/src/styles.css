@@ -26,6 +26,129 @@
   --glow-green: rgba(74, 122, 74, 0.2);
 }
 
+/* Primary loading screen */
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 35%, #141810 0%, #060806 55%, #020302 100%);
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.loading-screen.hidden {
+  display: none;
+}
+
+.loading-screen--out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loading-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 40%, transparent 0%, rgba(0, 0, 0, 0.55) 72%);
+  pointer-events: none;
+}
+
+.loading-shell {
+  position: relative;
+  z-index: 1;
+  width: min(480px, 92vw);
+  padding: 28px 26px 24px;
+  border: 1px solid var(--border-accent);
+  background: rgba(8, 10, 8, 0.92);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+}
+
+.loading-tag {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  text-align: center;
+}
+
+.loading-title {
+  margin: 0 0 6px;
+  text-align: center;
+  font-family: Oswald, sans-serif;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.loading-title .title-main {
+  display: block;
+  font-size: 42px;
+  letter-spacing: 0.08em;
+  color: var(--text-bright);
+}
+
+.loading-title .title-sub {
+  display: block;
+  font-size: 18px;
+  letter-spacing: 0.35em;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.loading-sub {
+  margin: 0 0 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.loading-bar-track {
+  height: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.loading-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3a5a32, #6a9a5a, #8ab87a);
+  box-shadow: 0 0 12px rgba(106, 154, 90, 0.45);
+  transition: width 0.35s ease;
+}
+
+.loading-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  font-size: 11px;
+}
+
+.loading-status {
+  color: var(--text);
+}
+
+.loading-percent {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.loading-tips {
+  margin: 0;
+  padding: 12px 0 0 18px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.loading-tips li {
+  margin-bottom: 4px;
+}
+
 html,
 body {
   height: 100%;

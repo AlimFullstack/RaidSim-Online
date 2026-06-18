@@ -4,6 +4,7 @@ import { AudioManager } from './audio.js';
 import { AuthService, ProfileStorage } from './auth.js';
 import { Lobby } from './lobby.js';
 import { loadSettings, saveSettings } from './settings.js';
+import { LoadingScreen } from './loading-screen.js';
 
 const canvas = document.getElementById('game');
 const ui = createUI();
@@ -91,9 +92,12 @@ function bindSettingsUI() {
 }
 
 async function boot() {
+  const loading = new LoadingScreen();
+  loading.setProgress(8, 'Звук и настройки...');
   bindAudioUnlock();
   bindSettingsUI();
 
+  loading.setProgress(22, 'Игровые системы...');
   lobby = new Lobby(auth, storage, {
     audio,
     unlockAudio: () => audio.unlock(preferredMusicTrack()),
@@ -105,16 +109,22 @@ async function boot() {
     },
   });
 
+  loading.setProgress(45, 'Подключение...');
   await auth.init();
 
+  loading.setProgress(72, 'Загрузка профиля...');
   if (auth.isLoggedIn()) {
     await lobby.refreshProfile();
+    loading.setProgress(92, 'Подготовка лобби...');
     lobby.showLobby();
   } else {
+    loading.setProgress(92, 'Ожидание входа...');
     lobby.showAuth();
   }
 
   document.getElementById('overlay')?.classList.add('hidden');
+  loading.setProgress(100, 'Готово');
+  await loading.hide();
 }
 
 document.getElementById('btn-retry')?.addEventListener('click', async () => {

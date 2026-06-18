@@ -62,6 +62,7 @@ export function serializeProfile(profile) {
     },
     loadout: {
       backpack: profile.loadout?.backpack || [null, null, null, null],
+      equipped: profile.loadout?.equipped || { weapon: null, armor: null },
     },
   });
   return data;

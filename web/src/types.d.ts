@@ -13,7 +13,7 @@
  * @property {QuestState} [quests]
  */
 
-/** @typedef {{ backpack: (StackItem|null)[] }} Loadout */
+/** @typedef {{ backpack: (StackItem|null)[], equipped: { weapon: StackItem|null, armor: StackItem|null } }} Loadout */
 /** @typedef {{ raids: number, extracts: number, kills: number, totalLootValue: number }} RaidStats */
 /** @typedef {{ active: import('./quests.js').Quest|null, completed: string[] }} QuestState */
 

@@ -1,19 +1,33 @@
 /** Доля экрана, которую игрок «видит» (по площади круга обзора) */
-export const VISION_COVERAGE_NORMAL = 0.85;
-export const VISION_COVERAGE_CRITICAL = 0.5;
+export const VISION_COVERAGE_NORMAL = 0.92;
+export const VISION_COVERAGE_CRITICAL = 0.55;
 export const CRITICAL_HP_RATIO = 0.2;
 
 /** @param {object} baseTheme @param {number} viewW @param {number} viewH @param {number} [hpRatio] */
 export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
   const halfDiag = Math.hypot(viewW, viewH) / 2;
   const coverage = hpRatio < CRITICAL_HP_RATIO ? VISION_COVERAGE_CRITICAL : VISION_COVERAGE_NORMAL;
-  const r = halfDiag * Math.sqrt(coverage) * 1.12;
+  const r = halfDiag * Math.sqrt(coverage) * 1.28;
   return {
     ...baseTheme,
     visionRadius: r,
     coneRange: r,
     coneAngle: Math.PI,
   };
+}
+
+/** Мягкая дыра в тумане — без жёстких граней полигона */
+export function fillSoftVision(ctx, px, py, radius) {
+  const g = ctx.createRadialGradient(px, py, 0, px, py, radius);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.92)');
+  g.addColorStop(0.78, 'rgba(255,255,255,0.45)');
+  g.addColorStop(0.92, 'rgba(255,255,255,0.12)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 /** @param {number} ox @param {number} oy @param {number} dx @param {number} dy @param {{x:number,y:number,w:number,h:number}} rect */

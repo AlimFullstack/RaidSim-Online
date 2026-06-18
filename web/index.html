@@ -16,6 +16,30 @@
     <link rel="stylesheet" href="/src/lobby.css" />
   </head>
   <body>
+    <div id="loading-screen" class="loading-screen" aria-live="polite">
+      <div class="loading-vignette"></div>
+      <div class="loading-shell tac-panel">
+        <p class="loading-tag">◆ RAIDSIM ONLINE ◆</p>
+        <h1 class="loading-title">
+          <span class="title-main">Сектор</span>
+          <span class="title-sub">Норвинск</span>
+        </h1>
+        <p class="loading-sub">Подготовка рейда · схрон · карты</p>
+        <div class="loading-bar-track">
+          <div id="loading-bar" class="loading-bar"></div>
+        </div>
+        <div class="loading-meta">
+          <span id="loading-status" class="loading-status">Инициализация...</span>
+          <span id="loading-percent" class="loading-percent">0%</span>
+        </div>
+        <ul class="loading-tips">
+          <li>Оружие не выдаётся — купи у торговца и положи в рюкзак</li>
+          <li>Экстракт до конца таймера · иначе MIA</li>
+          <li>Стой для точного выстрела из ПМ</li>
+        </ul>
+      </div>
+    </div>
+
     <canvas id="festive-bg" aria-hidden="true"></canvas>
 
     <button id="btn-mute" class="btn-mute" type="button" aria-label="Выключить звук">🔊</button>
@@ -61,9 +85,9 @@
 
           <div class="panel weapon">
             <div class="panel-head">🔫 ОРУЖИЕ</div>
-            <div id="weapon-name">ПМ</div>
-            <div id="ammo">18 / 36</div>
-            <div id="weapon-hint" class="hint">Полуавто · стой для выстрела</div>
+            <div id="weapon-name">—</div>
+            <div id="ammo">—</div>
+            <div id="weapon-hint" class="hint">Нет оружия · возьми в рюкзак</div>
           </div>
 
           <div class="panel inventory hotbar-panel">
@@ -71,7 +95,7 @@
               <div class="inv-title">🎒 ПАНЕЛЬ <span id="inv-count">0/4</span></div>
               <button id="btn-inv-expand" type="button" class="btn-inv-expand">РЮКЗАК ▾</button>
             </div>
-            <div id="active-slot-hint" class="active-slot-hint">Слот 1: ПМ · ЛКМ</div>
+            <div id="active-slot-hint" class="active-slot-hint">Слот 1: пусто</div>
             <div id="inv-slots" class="inv-slots hotbar"></div>
           </div>
         </div>
@@ -171,14 +195,15 @@
                 <h2 class="panel-title">СХРОН</h2>
                 <span id="stash-summary" class="tab-summary"></span>
               </div>
-              <div id="stash-grid" class="stash-grid-inline"></div>
+              <div id="stash-grid" class="stash-grid-inline" data-drop-zone="stash"></div>
             </div>
 
             <div id="tab-shop" class="tab-pane hidden">
               <div class="tab-pane-head">
                 <h2 class="panel-title">ТОРГОВЕЦ</h2>
-                <p class="tab-hint">Покупки применяются к следующему рейду</p>
+                <p class="tab-hint">Покупки попадают в схрон · применяются к следующему рейду</p>
               </div>
+              <p id="shop-hint" class="shop-hint-bar">Клик — выбрать товар · повторный клик по выбранному — покупка в схрон</p>
               <div id="shop-list" class="shop-grid"></div>
             </div>
 

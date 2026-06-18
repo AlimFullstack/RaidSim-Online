@@ -15,6 +15,7 @@ import {
 import { getWeapon, calcSpread, getMuzzleOffset } from './weapons.js';
 import {
   emptyBackpack,
+  cloneEquipped,
   cloneBackpack,
   BACKPACK_SIZE,
   addToBackpack,
@@ -274,9 +275,9 @@ export class Entity {
 }
 
 export class Player extends Entity {
-  constructor(x, y, walls = [], weaponId = 'pm') {
+  constructor(x, y, walls = []) {
     super(x, y, 16, walls);
-    this.equipWeapon(weaponId);
+    this.clearWeaponState();
     this.reserve = 36;
     this.fireCooldown = 0;
     this.reloadTime = 0;
@@ -298,28 +299,34 @@ export class Player extends Entity {
   }
 
   initRaidInventory(loadout = {}) {
-    const w = getWeapon('pm');
     this.backpack = cloneBackpack(loadout.backpack || emptyBackpack());
-    this.equipped = {
-      weapon: { id: 'pm', name: w.name, weapon: 'pm', starter: true, count: 1 },
-      armor: null,
-    };
+    this.equipped = cloneEquipped(loadout.equipped || {});
     this.weaponAmmo = {};
     this.selectedSlot = 0;
     this.armor = 0;
     this.maxArmor = 0;
-    this.equipWeapon('pm');
+    this.clearWeaponState();
 
-    for (let i = 0; i < BACKPACK_SIZE; i++) {
-      if (this.backpack[i]?.weapon) {
-        this.equipWeaponFromBackpack(i);
-        break;
+    if (this.equipped.weapon) {
+      this.equipWeapon(this.equipped.weapon.weapon);
+    } else {
+      for (let i = 0; i < BACKPACK_SIZE; i++) {
+        if (this.backpack[i]?.weapon) {
+          this.equipWeaponFromBackpack(i);
+          break;
+        }
       }
     }
-    for (let i = 0; i < BACKPACK_SIZE; i++) {
-      if (this.backpack[i]?.armor) {
-        this.equipArmorFromBackpack(i);
-        break;
+
+    if (this.equipped.armor) {
+      this.armor = this.equipped.armor.armor || 0;
+      this.maxArmor = this.armor;
+    } else {
+      for (let i = 0; i < BACKPACK_SIZE; i++) {
+        if (this.backpack[i]?.armor) {
+          this.equipArmorFromBackpack(i);
+          break;
+        }
       }
     }
   }
@@ -339,8 +346,11 @@ export class Player extends Entity {
   getSlotActionHint() {
     const item = this.getSelectedItem();
     const n = this.selectedSlot + 1;
-    const wName = this.equipped.weapon?.name || '—';
-    if (!item) return `Слот ${n} пуст · ${wName} · ЛКМ`;
+    const wName = this.equipped.weapon?.name || 'нет оружия';
+    if (!this.canShoot()) {
+      if (!item) return `Слот ${n} пуст · ${wName}`;
+      return `Слот ${n}: ${item.name} · ${wName}`;
+    }
     if (item.heal) return `Слот ${n}: ${item.name} · F лечиться · ${wName} · ЛКМ`;
     if (item.grenade) return `Слот ${n}: ${item.name} · G · ${wName} · ЛКМ`;
     if (item.smoke) return `Слот ${n}: ${item.name} · V · ${wName} · ЛКМ`;
@@ -367,9 +377,7 @@ export class Player extends Entity {
 
   getCarriedLoot() {
     const loot = this.backpack.filter(Boolean).map((i) => cloneItem(i));
-    if (this.equipped.weapon && !this.equipped.weapon.starter) {
-      loot.push(cloneItem(this.equipped.weapon));
-    }
+    if (this.equipped.weapon) loot.push(cloneItem(this.equipped.weapon));
     if (this.equipped.armor) loot.push(cloneItem(this.equipped.armor));
     return loot;
   }
@@ -433,14 +441,8 @@ export class Player extends Entity {
     if (this.backpack[slotIdx]) return { ok: false, msg: 'Слот занят' };
     this.saveWeaponAmmo();
     this.backpack[slotIdx] = cloneItem(weapon);
-    const w = getWeapon('pm');
-    this.equipped.weapon = { id: 'pm', name: w.name, weapon: 'pm', starter: true, count: 1 };
-    this.equipWeapon('pm');
-    const cached = this.weaponAmmo.pm;
-    if (cached) {
-      this.ammo = cached.ammo;
-      this.reserve = cached.reserve;
-    }
+    this.equipped.weapon = null;
+    this.clearWeaponState();
     return { ok: true, msg: 'Оружие в рюкзак' };
   }
 
@@ -514,7 +516,28 @@ export class Player extends Entity {
     return { ok: true, msg: 'Дымовая завеса' };
   }
 
+  clearWeaponState() {
+    this.weaponId = null;
+    this.weaponName = '—';
+    this.magSize = 0;
+    this.ammo = 0;
+    this.weaponDamage = 0;
+    this.fireRate = 0;
+    this.spread = 0;
+    this.moveSpread = 0;
+    this.sprintSpread = 0;
+    this.pellets = 1;
+    this.weaponRange = 0;
+    this.weaponDef = null;
+    this.semiAuto = false;
+    this.standToFire = false;
+  }
+
   equipWeapon(id) {
+    if (!id) {
+      this.clearWeaponState();
+      return;
+    }
     const w = getWeapon(id);
     this.weaponId = w.id;
     this.weaponName = w.name;
@@ -533,6 +556,7 @@ export class Player extends Entity {
   }
 
   getSpreadAngle() {
+    if (!this.canShoot()) return 0;
     return calcSpread(this.weaponDef || getWeapon(this.weaponId), {
       moving: this.isMoving,
       sprinting: this.isSprinting && this.isMoving,
@@ -739,42 +763,20 @@ export class Player extends Entity {
   }
 
   drawSpreadCone(ctx) {
-    if (!this.canShoot()) return;
+    if (!this.canShoot() || this.isMoving) return;
     const spread = this.currentSpread;
-    if (spread < 0.005) return;
+    if (spread < 0.02 || spread > 0.08) return;
 
-    const maxRange = this.weaponRange > 0 && this.weaponRange < 9000 ? this.weaponRange : 420;
-    const range = Math.max(280, maxRange);
-
+    const range = 120;
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-
-    const leftX = range * Math.cos(-spread);
-    const leftY = range * Math.sin(-spread);
-    const rightX = range * Math.cos(spread);
-    const rightY = range * Math.sin(spread);
-
-    ctx.fillStyle = 'rgba(138, 154, 122, 0.12)';
-    ctx.strokeStyle = 'rgba(138, 154, 122, 0.35)';
-    ctx.lineWidth = 1.5;
+    ctx.fillStyle = 'rgba(138, 154, 122, 0.04)';
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(leftX, leftY);
     ctx.arc(0, 0, range, -spread, spread);
     ctx.closePath();
     ctx.fill();
-    ctx.stroke();
-
-    ctx.strokeStyle = 'rgba(200, 220, 180, 0.45)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(leftX, leftY);
-    ctx.moveTo(0, 0);
-    ctx.lineTo(rightX, rightY);
-    ctx.stroke();
-
     ctx.restore();
   }
 }

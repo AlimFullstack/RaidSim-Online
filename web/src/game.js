@@ -79,7 +79,7 @@ export class Game {
     this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
     const walls = this.activeMap.walls;
-    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls, 'pm');
+    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls);
     this.player.initRaidInventory(loadout);
     this.lootPoints = this.activeMap.lootPoints.map((p) => new LootPoint(p.x, p.y, p.tier));
     this.scavs = this.activeMap.scavSpawns.map((s) => new Scav(s.x, s.y, walls));
@@ -792,7 +792,7 @@ export function createUI() {
         } else if (p.canShoot()) {
           weaponHint.textContent = 'Авто · R перезарядка';
         } else {
-          weaponHint.textContent = 'Выбери слот с оружием';
+          weaponHint.textContent = 'Нет оружия · Tab — надень из рюкзака';
         }
       }
       const hintEl = document.getElementById('active-slot-hint');

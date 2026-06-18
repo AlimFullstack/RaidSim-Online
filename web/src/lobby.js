@@ -12,7 +12,7 @@ import {
 import { getMapList, getMapById } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
-import { emptyBackpack, cloneBackpack } from './inventory-core.js';
+import { emptyBackpack, cloneBackpack, loadoutHasWeapon, cloneEquipped } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
 
@@ -29,6 +29,7 @@ export class Lobby {
     this.selectedMode = 'standard';
     this.selectedMap = 'factory';
     this.activeTab = 'raid';
+    this.selectedShopId = null;
 
     this.el = {
       auth: document.getElementById('auth-screen'),
@@ -47,6 +48,7 @@ export class Lobby {
       stashGrid: document.getElementById('stash-grid'),
       stashSummary: document.getElementById('stash-summary'),
       shopList: document.getElementById('shop-list'),
+      shopHint: document.getElementById('shop-hint'),
       hideoutStats: document.getElementById('hideout-stats'),
       slotsLeft: document.getElementById('loadout-slots'),
       slotsRight: null,
@@ -110,6 +112,7 @@ export class Lobby {
   }
 
   switchTab(tabId) {
+    if (tabId !== 'shop') this.selectedShopId = null;
     this.activeTab = tabId;
     document.querySelectorAll('.lobby-tab').forEach((t) => {
       t.classList.toggle('active', t.dataset.tab === tabId);
@@ -236,30 +239,63 @@ export class Lobby {
   renderShop() {
     if (!this.el.shopList || !this.profile) return;
     const rubles = this.profile.rubles;
+    const selected = this.selectedShopId;
+    const selectedItem = SHOP_ITEMS.find((i) => i.id === selected);
+
+    if (this.el.shopHint) {
+      if (selectedItem) {
+        const afford = rubles >= selectedItem.cost;
+        this.el.shopHint.classList.add('shop-hint-bar--active');
+        this.el.shopHint.innerHTML = afford
+          ? `<strong>${selectedItem.name}</strong> выбран — <span class="shop-hint-buy">нажми ещё раз, чтобы купить за ${selectedItem.cost} ₽</span>`
+          : `<strong>${selectedItem.name}</strong> выбран — <span class="shop-hint-warn">не хватает рублей (${rubles} / ${selectedItem.cost} ₽)</span>`;
+      } else {
+        this.el.shopHint.classList.remove('shop-hint-bar--active');
+        this.el.shopHint.textContent = 'Клик — выбрать товар · повторный клик по выбранному — покупка в схрон';
+      }
+    }
+
     this.el.shopList.innerHTML = SHOP_ITEMS.map((item) => {
       const afford = rubles >= item.cost;
+      const isSelected = item.id === selected;
+      const classes = [
+        'shop-card',
+        !afford ? 'shop-card--disabled' : '',
+        isSelected ? 'shop-card--selected' : '',
+      ].filter(Boolean).join(' ');
       return `
-      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
+      <button type="button" class="${classes}" data-shop="${item.id}" ${afford ? '' : 'disabled'} aria-pressed="${isSelected}">
         <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
         <span class="shop-card-name">${item.name}</span>
         <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
         <span class="shop-card-cost">${item.cost} ₽</span>
+        ${isSelected ? '<span class="shop-card-action">КУПИТЬ</span>' : '<span class="shop-card-pick">Выбрать</span>'}
       </button>`;
     }).join('');
 
     this.el.shopList.querySelectorAll('.shop-card:not([disabled])').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        this.uiClick();
-        const r = buyShopItem(this.profile, btn.dataset.shop);
-        if (!r.ok) {
-          this.flash(r.msg);
-          return;
-        }
-        this.profile = r.profile;
-        await this.persistProfile(null);
-        this.onProfileChanged(r.msg);
-      });
+      btn.addEventListener('click', () => this.handleShopClick(btn.dataset.shop));
     });
+  }
+
+  async handleShopClick(shopId) {
+    this.uiClick();
+    if (this.selectedShopId !== shopId) {
+      this.selectedShopId = shopId;
+      this.renderShop();
+      return;
+    }
+
+    const r = buyShopItem(this.profile, shopId);
+    if (!r.ok) {
+      this.flash(r.msg);
+      this.renderShop();
+      return;
+    }
+    this.selectedShopId = null;
+    this.profile = r.profile;
+    await this.persistProfile(null);
+    this.onProfileChanged(r.msg);
   }
 
   shopEffectDesc(item) {
@@ -360,13 +396,19 @@ export class Lobby {
 
   async play() {
     if (!this.profile) return;
-    const backpack = cloneBackpack(this.profile.loadout?.backpack || emptyBackpack());
+    const ld = this.profile.loadout || {};
+    const backpack = cloneBackpack(ld.backpack || emptyBackpack());
+    const equipped = cloneEquipped(ld.equipped || {});
+    if (!loadoutHasWeapon({ backpack, equipped })) {
+      this.flash('Надень оружие на персонажа или положи в рюкзак');
+      return;
+    }
     this.profile = {
       ...this.profile,
-      loadout: { backpack: emptyBackpack() },
+      loadout: { backpack: emptyBackpack(), equipped: { weapon: null, armor: null } },
     };
     if (!this.auth.isGuest()) await this.persistProfile(null);
-    this.callbacks.onPlay(this.selectedMode, { backpack }, this.selectedMap);
+    this.callbacks.onPlay(this.selectedMode, { backpack, equipped }, this.selectedMap);
   }
 
   renderStash() {
@@ -379,11 +421,20 @@ export class Lobby {
     }
 
     if (!items.length) {
-      this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. Купи у торговца или вынеси лут с рейда. Перетащи в рюкзак оператора (4 слота).</p>';
+      this.el.stashGrid.innerHTML = `
+        <div class="stash-drop-bin" data-drop-zone="stash">
+          <span class="stash-drop-icon">↩</span>
+          <span class="stash-drop-title">Схрон пуст</span>
+          <span class="stash-drop-hint">Перетащи сюда из рюкзака оператора</span>
+        </div>`;
       return;
     }
 
-    this.el.stashGrid.innerHTML = items
+    this.el.stashGrid.innerHTML = `
+      <div class="stash-drop-bin stash-drop-bin--compact" data-drop-zone="stash">
+        <span class="stash-drop-hint">↩ Перетащи из оператора — вернуть в схрон</span>
+      </div>
+      ${items
       .map(
         (item, i) => `
       <div class="stash-cell inv-slot filled" draggable="true" data-stash-idx="${i}" data-drop-zone="stash" title="Перетащи в рюкзак оператора">
@@ -392,8 +443,7 @@ export class Lobby {
         <span class="stash-cell-value">${(item.value || 0) * (item.count || 1)} ₽</span>
         <button type="button" class="sell-btn" data-idx="${i}">Продать</button>
       </div>`
-      )
-      .join('');
+      .join('')}`;
 
     this.el.stashGrid.querySelectorAll('.sell-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -469,12 +519,29 @@ export class Lobby {
   renderOperatorSlots() {
     const el = this.el.slotsLeft;
     if (!el || !this.profile) return;
-    const bp = this.profile.loadout?.backpack || emptyBackpack();
+    const ld = this.profile.loadout || {};
+    const bp = ld.backpack || emptyBackpack();
+    const eq = ld.equipped || { weapon: null, armor: null };
     const used = bp.filter(Boolean).length;
 
+    const equipSlot = (type, item, label) => `
+      <div class="inv-slot equip-slot operator-equip-slot ${item ? 'filled' : ''}"
+           data-drop-zone="equip-${type}"
+           data-equip-type="${type}"
+           draggable="${item ? 'true' : 'false'}"
+           title="${item ? item.name : label}">
+        <span class="slot-label">${label}</span>
+        ${renderInvSlotContent(item)}
+      </div>`;
+
     el.innerHTML = `
+      <p class="operator-pack-label">ЭКИПИРОВКА</p>
+      <div class="operator-equip-grid">
+        ${equipSlot('weapon', eq.weapon, 'ОРУЖИЕ')}
+        ${equipSlot('armor', eq.armor, 'БРОНЯ')}
+      </div>
       <p class="operator-pack-label">РЮКЗАК НА РЕЙД <span>${used}/4</span></p>
-      <p class="operator-pack-hint">Перетащи из вкладки СХРОН · по 1 шт.</p>
+      <p class="operator-pack-hint">Из СХРОНА → рюкзак или на персонажа · по 1 шт.</p>
       <div class="loadout-slots-grid">
         ${bp.map((item, i) => `
           <div class="inv-slot loadout-slot ${item ? 'filled' : ''}"
@@ -487,7 +554,11 @@ export class Lobby {
             ${renderInvSlotContent(item)}
           </div>`).join('')}
       </div>
-      <p class="operator-starter-note">ПМ выдаётся бесплатно · не занимает слот</p>`;
+      <div class="stash-return-zone" data-drop-zone="stash" title="Перетащи предмет из рюкзака или экипировки">
+        <span class="stash-return-icon">↩</span>
+        <span class="stash-return-text">ВЕРНУТЬ В СХРОН</span>
+        <span class="stash-return-hint">рюкзак или экипировка · по 1 шт.</span>
+      </div>`;
   }
 
   renderQuestCard() {
@@ -520,9 +591,21 @@ export class Lobby {
     const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
     const bp = this.profile.loadout?.backpack || emptyBackpack();
+    const eq = this.profile.loadout?.equipped || {};
     const packItems = bp.filter(Boolean).map((i) => `${i.name}${i.count > 1 ? ` ×${i.count}` : ''}`);
-    const equipParts = ['ПМ (старт)'];
-    if (packItems.length) equipParts.push(...packItems);
+    const equipParts = [];
+    if (eq.weapon) equipParts.push(eq.weapon.name);
+    else {
+      const w = bp.find((i) => i?.weapon);
+      if (w) equipParts.push(`${w.name} (рюкзак)`);
+    }
+    if (eq.armor) equipParts.push(eq.armor.name);
+    for (const name of packItems) {
+      const base = name.split(' ×')[0];
+      if (!equipParts.includes(base) && !equipParts.some((p) => p.startsWith(base))) {
+        equipParts.push(name);
+      }
+    }
 
     const threat =
       this.selectedMode === 'boss'
@@ -549,7 +632,7 @@ export class Lobby {
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Рюкзак</span>
-        <span class="briefing-value">${packItems.length ? equipParts.join(', ') : 'Пусто — только ПМ'}</span>
+        <span class="briefing-value">${equipParts.length ? equipParts.join(', ') : 'Нет оружия — рейд недоступен'}</span>
       </div>
     `;
   }
@@ -617,7 +700,7 @@ export class Lobby {
     ctx.fillStyle = '#1a1e18';
     ctx.fillRect(w / 2 + 30, bodyY + 48, 36, 8);
 
-    if (this.profile?.loadout?.backpack?.some((i) => i?.armor)) {
+    if (this.profile?.loadout?.equipped?.armor || this.profile?.loadout?.backpack?.some((i) => i?.armor)) {
       ctx.strokeStyle = '#5a7a8a';
       ctx.lineWidth = 3;
       ctx.beginPath();

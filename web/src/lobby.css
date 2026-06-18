@@ -229,6 +229,46 @@ body:has(.lobby-screen:not(.hidden)) #app {
   gap: 8px;
 }
 
+.operator-equip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.operator-equip-slot {
+  min-height: 72px;
+  padding: 8px 6px;
+  border: 1px dashed #2a3228;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: grab;
+  position: relative;
+}
+
+.operator-equip-slot.filled {
+  border-style: solid;
+  border-color: var(--border-accent);
+}
+
+.operator-equip-slot .slot-label {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.operator-equip-slot.drop-target,
+.stash-return-zone.drop-target,
+.loadout-slot.drop-target,
+.stash-drop-bin.drop-target,
+.stash-grid-inline.drop-target {
+  border-color: #5dade2;
+  background: rgba(93, 173, 226, 0.12);
+}
+
 .loadout-slots-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -769,6 +809,82 @@ body:has(.lobby-screen:not(.hidden)) #app {
   font-family: 'JetBrains Mono', monospace;
 }
 
+.stash-return-zone,
+.stash-drop-bin {
+  border: 1px dashed var(--border-accent);
+  background: rgba(58, 68, 52, 0.12);
+  border-radius: 3px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.stash-return-zone.drop-target,
+.stash-drop-bin.drop-target,
+.stash-grid-inline.drop-target {
+  border-color: #5dade2;
+  background: rgba(93, 173, 226, 0.14);
+}
+
+.stash-return-zone {
+  margin-top: 10px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  cursor: copy;
+}
+
+.stash-return-icon {
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.stash-return-text {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-bright);
+}
+
+.stash-return-hint {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.stash-drop-bin {
+  grid-column: 1 / -1;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  min-height: 72px;
+  justify-content: center;
+}
+
+.stash-drop-bin--compact {
+  min-height: auto;
+  padding: 10px 12px;
+  flex-direction: row;
+  justify-content: center;
+}
+
+.stash-drop-icon {
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.stash-drop-title {
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.stash-drop-hint {
+  font-size: 10px;
+  color: var(--muted);
+}
+
 .stash-grid-inline {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -821,6 +937,31 @@ body:has(.lobby-screen:not(.hidden)) #app {
   gap: 10px;
 }
 
+.shop-hint-bar {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px dashed #2a3228;
+  background: rgba(0, 0, 0, 0.25);
+  line-height: 1.45;
+}
+
+.shop-hint-bar--active {
+  border-style: solid;
+  border-color: var(--border-accent);
+  color: var(--text);
+  background: rgba(46, 204, 113, 0.06);
+}
+
+.shop-hint-buy {
+  color: var(--ok);
+}
+
+.shop-hint-warn {
+  color: #e67e22;
+}
+
 .shop-card {
   display: flex;
   flex-direction: column;
@@ -832,6 +973,17 @@ body:has(.lobby-screen:not(.hidden)) #app {
   text-align: left;
   color: var(--text);
   font-family: inherit;
+  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.shop-card:hover:not(.shop-card--disabled):not(.shop-card--selected) {
+  border-color: #3a4438;
+}
+
+.shop-card--selected {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(46, 204, 113, 0.45), inset 0 0 20px rgba(46, 204, 113, 0.08);
 }
 
 .shop-card--disabled {
@@ -842,6 +994,36 @@ body:has(.lobby-screen:not(.hidden)) #app {
 .shop-card--equipped {
   border-color: var(--ok) !important;
   box-shadow: inset 0 0 0 1px rgba(46, 204, 113, 0.35);
+}
+
+.shop-card-pick {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.shop-card:hover:not(.shop-card--disabled) .shop-card-pick {
+  opacity: 1;
+}
+
+.shop-card--selected .shop-card-pick {
+  display: none;
+}
+
+.shop-card-action {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: #0a0c0a;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 8px;
+  border: 1px solid var(--ok);
+  background: var(--ok);
+  margin-top: 4px;
 }
 
 .shop-card-icon {

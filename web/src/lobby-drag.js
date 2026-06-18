@@ -1,4 +1,14 @@
-import { moveStashToLoadout, moveLoadoutToStash } from './inventory-core.js';
+import {
+  moveStashToLoadout,
+  moveLoadoutToStash,
+  lobbyEquipWeapon,
+  lobbyEquipArmor,
+  lobbyEquipWeaponFromStash,
+  lobbyEquipArmorFromStash,
+  lobbyUnequipWeapon,
+  lobbyUnequipArmor,
+  lobbyEquipToStash,
+} from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 
 const DRAG_MIME = 'application/x-raidsim-inv';
@@ -17,9 +27,13 @@ export function setupLobbyDrag(lobby) {
   };
 
   document.addEventListener('dragstart', (e) => {
+    if (e.target.closest('.sell-btn')) {
+      e.preventDefault();
+      return;
+    }
     const stashEl = e.target.closest('[data-stash-idx]');
     const loadoutEl = e.target.closest('[data-loadout-idx]');
-    if (!stashEl && !loadoutEl) return;
+    const equipEl = e.target.closest('.operator-equip-slot[data-equip-type]');
 
     if (stashEl) {
       dragPayload = { source: 'stash', index: Number(stashEl.dataset.stashIdx) };
@@ -31,6 +45,14 @@ export function setupLobbyDrag(lobby) {
         return;
       }
       dragPayload = { source: 'loadout', index: idx };
+    } else if (equipEl) {
+      const type = equipEl.dataset.equipType;
+      const item = lobby.profile?.loadout?.equipped?.[type];
+      if (!item) {
+        e.preventDefault();
+        return;
+      }
+      dragPayload = { source: 'equip', type };
     } else {
       return;
     }
@@ -39,12 +61,14 @@ export function setupLobbyDrag(lobby) {
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(dragPayload));
     stashEl?.classList.add('dragging');
     loadoutEl?.classList.add('dragging');
+    equipEl?.classList.add('dragging');
   });
 
-  document.addEventListener('dragend', (e) => {
+  document.addEventListener('dragend', () => {
     dragPayload = null;
-    e.target.closest?.('[data-stash-idx], [data-loadout-idx]')?.classList.remove('dragging');
-    document.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+    document.querySelectorAll('.dragging, .drop-target').forEach((el) => {
+      el.classList.remove('dragging', 'drop-target');
+    });
   });
 
   document.addEventListener('dragover', (e) => {
@@ -73,8 +97,11 @@ export function setupLobbyDrag(lobby) {
     let r = { ok: false, msg: 'Нельзя переместить' };
 
     if (payload.source === 'stash' && zoneType === 'loadout') {
-      const slot = Number(zone.dataset.slot);
-      r = moveStashToLoadout(lobby.profile, payload.index, slot, 1);
+      r = moveStashToLoadout(lobby.profile, payload.index, Number(zone.dataset.slot), 1);
+    } else if (payload.source === 'stash' && zoneType === 'equip-weapon') {
+      r = lobbyEquipWeaponFromStash(lobby.profile, payload.index);
+    } else if (payload.source === 'stash' && zoneType === 'equip-armor') {
+      r = lobbyEquipArmorFromStash(lobby.profile, payload.index);
     } else if (payload.source === 'loadout' && zoneType === 'stash') {
       r = moveLoadoutToStash(lobby.profile, payload.index, 1);
     } else if (payload.source === 'loadout' && zoneType === 'loadout') {
@@ -86,6 +113,16 @@ export function setupLobbyDrag(lobby) {
         bp[payload.index] = tmp;
         r = { ok: true, profile: lobby.profile, msg: 'Перемещено' };
       }
+    } else if (payload.source === 'loadout' && zoneType === 'equip-weapon') {
+      r = lobbyEquipWeapon(lobby.profile, payload.index);
+    } else if (payload.source === 'loadout' && zoneType === 'equip-armor') {
+      r = lobbyEquipArmor(lobby.profile, payload.index);
+    } else if (payload.source === 'equip' && zoneType === 'loadout') {
+      const slot = Number(zone.dataset.slot);
+      if (payload.type === 'weapon') r = lobbyUnequipWeapon(lobby.profile, slot);
+      else if (payload.type === 'armor') r = lobbyUnequipArmor(lobby.profile, slot);
+    } else if (payload.source === 'equip' && zoneType === 'stash') {
+      r = lobbyEquipToStash(lobby.profile, payload.type);
     }
 
     if (!r.ok) {

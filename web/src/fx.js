@@ -1,5 +1,5 @@
 import { getMapTheme } from './map-atmosphere.js';
-import { computeVisionPolygon, fillVisionPolygon, buildVisionTheme } from './visibility.js';
+import { buildVisionTheme, fillSoftVision } from './visibility.js';
 
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
@@ -437,7 +437,6 @@ export class GameFx {
     const viewH = game.canvas.height / game.scale;
     const camX = game.camRenderX ?? game.camX;
     const camY = game.camRenderY ?? game.camY;
-    const walls = game.activeMap?.walls || [];
 
     const theme = buildVisionTheme(
       getMapTheme(game.activeMap?.theme),
@@ -445,19 +444,17 @@ export class GameFx {
       viewH,
       p.hp / p.maxHp
     );
-    const visionPoly = computeVisionPolygon(p.x, p.y, p.angle, walls, theme);
 
     ctx.save();
     ctx.fillStyle = theme.fogColor;
     ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
 
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = 'rgba(255,255,255,1)';
-    fillVisionPolygon(ctx, visionPoly, p.x, p.y);
+    fillSoftVision(ctx, p.x, p.y, theme.visionRadius);
 
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = theme.fogTint;
-    ctx.globalAlpha = 0.1;
+    ctx.globalAlpha = 0.06;
     ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -481,11 +478,11 @@ export class GameFx {
   }
 
   drawRaidVignette(ctx, w, h, light = false) {
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.78);
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.42, w / 2, h / 2, Math.max(w, h) * 0.85);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.65, light ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.1)');
-    g.addColorStop(0.88, light ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.22)');
-    g.addColorStop(1, light ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.32)');
+    g.addColorStop(0.7, light ? 'rgba(0,0,0,0.02)' : 'rgba(0,0,0,0.06)');
+    g.addColorStop(0.92, light ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.14)');
+    g.addColorStop(1, light ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.22)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
