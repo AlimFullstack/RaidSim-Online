@@ -30,7 +30,7 @@ export function punchVisionHole(ctx, points, px, py) {
 }
 
 /** Мягкая размытая граница обзора (как фонарик) */
-export function punchSoftVisionHole(ctx, points, px, py, feather = 20) {
+export function punchSoftVisionHole(ctx, points, px, py, feather = 50) {
   if (!points.length) return;
   ctx.globalCompositeOperation = 'destination-out';
   punchVisionHole(ctx, points, px, py);

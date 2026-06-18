@@ -468,7 +468,7 @@ export class GameFx {
     const localPts = visionPts.map((pt) => ({ x: pt.x - camX + pad, y: pt.y - camY + pad }));
 
     fctx.globalCompositeOperation = 'destination-out';
-    punchSoftVisionHole(fctx, localPts, px, py, 22);
+    punchSoftVisionHole(fctx, localPts, px, py, 50);
     fctx.globalCompositeOperation = 'source-over';
 
     ctx.drawImage(fc, camX - pad, camY - pad);
