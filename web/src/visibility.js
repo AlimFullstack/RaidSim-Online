@@ -20,9 +20,9 @@ export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
 export function fillSoftVision(ctx, px, py, radius) {
   const g = ctx.createRadialGradient(px, py, 0, px, py, radius);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.92)');
-  g.addColorStop(0.78, 'rgba(255,255,255,0.45)');
-  g.addColorStop(0.92, 'rgba(255,255,255,0.12)');
+  g.addColorStop(0.7, 'rgba(255,255,255,1)');
+  g.addColorStop(0.86, 'rgba(255,255,255,0.65)');
+  g.addColorStop(0.95, 'rgba(255,255,255,0.2)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.beginPath();

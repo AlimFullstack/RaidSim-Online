@@ -674,7 +674,6 @@ export class Game {
     this.fx.drawScreen(ctx, this.canvas.width, this.canvas.height, {
       raid: this.state === 'raid',
       time: this.animTime,
-      fogTint: this.activeMap ? getMapTheme(this.activeMap.theme).fogTint : null,
       hpRatio: this.player ? this.player.hp / this.player.maxHp : 1,
     });
     this.drawCrosshair(ctx);

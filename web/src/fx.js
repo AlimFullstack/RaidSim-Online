@@ -184,6 +184,7 @@ export class GameFx {
     this.extractGlow = 0;
     this.camKickX = 0;
     this.camKickY = 0;
+    this._fogCanvas = null;
   }
 
   clear() {
@@ -437,6 +438,9 @@ export class GameFx {
     const viewH = game.canvas.height / game.scale;
     const camX = game.camRenderX ?? game.camX;
     const camY = game.camRenderY ?? game.camY;
+    const pad = 20;
+    const fw = Math.ceil(viewW + pad * 2);
+    const fh = Math.ceil(viewH + pad * 2);
 
     const theme = buildVisionTheme(
       getMapTheme(game.activeMap?.theme),
@@ -445,19 +449,24 @@ export class GameFx {
       p.hp / p.maxHp
     );
 
-    ctx.save();
-    ctx.fillStyle = theme.fogColor;
-    ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
+    if (!this._fogCanvas) this._fogCanvas = document.createElement('canvas');
+    const fc = this._fogCanvas;
+    if (fc.width !== fw) fc.width = fw;
+    if (fc.height !== fh) fc.height = fh;
+    const fctx = fc.getContext('2d');
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.clearRect(0, 0, fw, fh);
+    fctx.globalCompositeOperation = 'source-over';
+    fctx.globalAlpha = 1;
 
-    ctx.globalCompositeOperation = 'destination-out';
-    fillSoftVision(ctx, p.x, p.y, theme.visionRadius);
+    fctx.fillStyle = theme.fogColor;
+    fctx.fillRect(0, 0, fw, fh);
 
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = theme.fogTint;
-    ctx.globalAlpha = 0.06;
-    ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
-    ctx.globalAlpha = 1;
-    ctx.restore();
+    fctx.globalCompositeOperation = 'destination-out';
+    fillSoftVision(fctx, p.x - camX + pad, p.y - camY + pad, theme.visionRadius);
+    fctx.globalCompositeOperation = 'source-over';
+
+    ctx.drawImage(fc, camX - pad, camY - pad);
   }
 
   drawCriticalHpPulse(ctx, w, h, time = 0) {
@@ -527,13 +536,6 @@ export class GameFx {
       const critical = (opts.hpRatio ?? 1) < 0.2;
       this.drawRaidVignette(ctx, w, h, !critical);
       if (critical) this.drawCriticalHpPulse(ctx, w, h, opts.time || 0);
-      this.drawFilmGrain(ctx, w, h, opts.time || 0);
-      if (opts.fogTint) {
-        ctx.fillStyle = opts.fogTint;
-        ctx.globalAlpha = 0.12;
-        ctx.fillRect(0, 0, w, h);
-        ctx.globalAlpha = 1;
-      }
     }
   }
 }
