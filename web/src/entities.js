@@ -66,7 +66,12 @@ export class Input {
     this.mouse.justDown = false;
   }
 
-  updateWorld(camX, camY, scale) {
+  updateWorld(camX, camY, scale, canvas) {
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      this.mouse.displayScaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+      this.mouse.displayScaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    }
     const sx = this.mouse.displayScaleX ?? 1;
     const sy = this.mouse.displayScaleY ?? 1;
     const mx = this.mouse.x * sx;
@@ -280,7 +285,6 @@ export class Player extends Entity {
     this.noiseLevel = 0;
     this.recoilHeat = 0;
     this.currentSpread = 0;
-    this.recoilAngle = 0;
     this.fireBlockedReason = '';
   }
 
@@ -457,11 +461,9 @@ export class Player extends Entity {
     this.noiseLevel = this.isSprinting ? 1 : this.isMoving ? 0.4 : 0;
 
     this.recoilHeat = Math.max(0, this.recoilHeat - dt * (this.semiAuto ? 2.4 : 1.6));
-    this.recoilAngle = this.recoilAngle * Math.max(0, 1 - dt * 12);
     this.currentSpread = this.getSpreadAngle();
 
-    const aimAngle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
-    this.angle = aimAngle + this.recoilAngle;
+    this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
 
     for (let i = 0; i < this.maxInv; i++) {
       if (input.tapped(`Digit${i + 1}`)) this.selectSlot(i);
@@ -498,8 +500,6 @@ export class Player extends Entity {
       this.fireCooldown = w.fireRate;
       this.noiseLevel = 1;
       this.recoilHeat = Math.min(1, this.recoilHeat + (w.semiAuto ? 0.55 : 0.4));
-      const kick = (w.recoilKick || 6) * 0.0022;
-      this.recoilAngle += (Math.random() - 0.5) * kick * 2 - kick * 0.3;
 
       const spreadTotal = this.getSpreadAngle();
       const bullets = [];

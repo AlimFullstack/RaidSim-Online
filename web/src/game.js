@@ -32,6 +32,8 @@ export class Game {
     this.scale = 1;
     this.camX = 0;
     this.camY = 0;
+    this.camRenderX = 0;
+    this.camRenderY = 0;
     this.statusTimer = 0;
     this.lastTime = 0;
     this.animTime = 0;
@@ -579,34 +581,23 @@ export class Game {
     const mapH = this.activeMap.mapH;
     const viewW = this.canvas.width / this.scale;
     const viewH = this.canvas.height / this.scale;
-    this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2 + (this.fx.camKickX || 0)));
-    this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2 + (this.fx.camKickY || 0)));
-    const sens = this.settings?.mouseSens ?? 1;
-    this.input.updateWorld(this.camX, this.camY, this.scale);
-    if (sens !== 1 && this.player) {
-      const p = this.player;
-      const cx = this.canvas.width / 2;
-      const cy = this.canvas.height / 2;
-      const viewCx = this.camX + cx / this.scale;
-      const viewCy = this.camY + cy / this.scale;
-      const trueAngle = Math.atan2(this.input.mouse.worldY - p.y, this.input.mouse.worldX - p.x);
-      const centerAngle = Math.atan2(viewCy - p.y, viewCx - p.x);
-      let delta = trueAngle - centerAngle;
-      while (delta > Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-      const clamped = centerAngle + delta * Math.min(2, Math.max(0.5, sens));
-      const aimDist = dist(p.x, p.y, this.input.mouse.worldX, this.input.mouse.worldY);
-      this.input.mouse.worldX = p.x + Math.cos(clamped) * aimDist;
-      this.input.mouse.worldY = p.y + Math.sin(clamped) * aimDist;
-    }
+    this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2));
+    this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2));
+    this.camRenderX = Math.max(0, Math.min(mapW - viewW, this.camX + (this.fx.camKickX || 0)));
+    this.camRenderY = Math.max(0, Math.min(mapH - viewH, this.camY + (this.fx.camKickY || 0)));
+    this.input.updateWorld(this.camX, this.camY, this.scale, this.canvas);
   }
 
   resize() {
     const maxW = Math.min(window.innerWidth, 1280);
     const maxH = Math.min(window.innerHeight - 60, 900);
-    this.canvas.width = Math.max(640, Math.floor(maxW));
-    this.canvas.height = Math.max(480, Math.floor(maxH));
-    this.scale = this.state === 'raid' ? 1.5 : 1;
+    const w = Math.max(640, Math.floor(maxW));
+    const h = Math.max(480, Math.floor(maxH));
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.scale = this.state === 'raid' ? 1.35 : 1;
     if (this.player) this.updateCamera();
   }
 
@@ -631,7 +622,7 @@ export class Game {
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.state === 'menu') return;
 
-    ctx.setTransform(this.scale, 0, 0, this.scale, -this.camX * this.scale, -this.camY * this.scale);
+    ctx.setTransform(this.scale, 0, 0, this.scale, -this.camRenderX * this.scale, -this.camRenderY * this.scale);
     drawMap(ctx, this.animTime, this.activeMap);
     for (const s of this.smokeZones) s.draw(ctx);
     for (const lp of this.lootPoints) lp.draw(ctx);

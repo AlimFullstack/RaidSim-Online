@@ -440,16 +440,19 @@ export class GameFx {
     const coneRange = theme.coneRange;
     const coneAngle = theme.coneAngle;
 
+    const camX = game.camRenderX ?? game.camX;
+    const camY = game.camRenderY ?? game.camY;
+
     ctx.save();
     ctx.fillStyle = theme.fogColor;
-    ctx.fillRect(game.camX - 20, game.camY - 20, viewW + 40, viewH + 40);
+    ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
 
     ctx.globalCompositeOperation = 'destination-out';
 
     const foot = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, vision);
     foot.addColorStop(0, 'rgba(0,0,0,1)');
-    foot.addColorStop(0.35, 'rgba(0,0,0,0.92)');
-    foot.addColorStop(0.65, 'rgba(0,0,0,0.5)');
+    foot.addColorStop(0.4, 'rgba(0,0,0,0.75)');
+    foot.addColorStop(0.72, 'rgba(0,0,0,0.28)');
     foot.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = foot;
     ctx.beginPath();
@@ -458,7 +461,7 @@ export class GameFx {
 
     const coneGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, coneRange);
     coneGrad.addColorStop(0, 'rgba(0,0,0,1)');
-    coneGrad.addColorStop(0.5, 'rgba(0,0,0,0.75)');
+    coneGrad.addColorStop(0.55, 'rgba(0,0,0,0.5)');
     coneGrad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = coneGrad;
     ctx.beginPath();
@@ -469,16 +472,18 @@ export class GameFx {
 
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = theme.fogTint;
-    ctx.fillRect(game.camX - 20, game.camY - 20, viewW + 40, viewH + 40);
+    ctx.globalAlpha = 0.45;
+    ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
   drawRaidVignette(ctx, w, h) {
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.04, w / 2, h / 2, Math.max(w, h) * 0.52);
+    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.12, w / 2, h / 2, Math.max(w, h) * 0.62);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.4, 'rgba(0,0,0,0.45)');
-    g.addColorStop(0.75, 'rgba(0,0,0,0.78)');
-    g.addColorStop(1, 'rgba(0,0,0,0.95)');
+    g.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+    g.addColorStop(0.82, 'rgba(0,0,0,0.48)');
+    g.addColorStop(1, 'rgba(0,0,0,0.62)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, w, h);
   }
@@ -524,7 +529,7 @@ export class GameFx {
       this.drawFilmGrain(ctx, w, h, opts.time || 0);
       if (opts.fogTint) {
         ctx.fillStyle = opts.fogTint;
-        ctx.globalAlpha = 0.35;
+        ctx.globalAlpha = 0.12;
         ctx.fillRect(0, 0, w, h);
         ctx.globalAlpha = 1;
       }

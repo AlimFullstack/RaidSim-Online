@@ -13,11 +13,11 @@ export const MAP_THEMES = {
     rust: 'rgba(120, 58, 28, 0.35)',
     oil: 'rgba(18, 14, 10, 0.55)',
     hazard: '#c9a227',
-    fogColor: 'rgba(6, 5, 3, 0.94)',
-    fogTint: 'rgba(48, 32, 12, 0.22)',
-    visionRadius: 105,
-    coneRange: 200,
-    coneAngle: 0.55,
+    fogColor: 'rgba(6, 5, 3, 0.68)',
+    fogTint: 'rgba(48, 32, 12, 0.1)',
+    visionRadius: 155,
+    coneRange: 270,
+    coneAngle: 0.62,
     ambientLabel: 'Промзона · ржавчина · тусклый свет',
   },
   night: {
@@ -33,11 +33,11 @@ export const MAP_THEMES = {
     rust: 'rgba(40, 60, 100, 0.25)',
     oil: 'rgba(8, 16, 32, 0.5)',
     hazard: '#3a7ab8',
-    fogColor: 'rgba(2, 4, 14, 0.96)',
-    fogTint: 'rgba(12, 20, 48, 0.35)',
-    visionRadius: 78,
-    coneRange: 175,
-    coneAngle: 0.48,
+    fogColor: 'rgba(2, 4, 14, 0.72)',
+    fogTint: 'rgba(12, 20, 48, 0.14)',
+    visionRadius: 125,
+    coneRange: 250,
+    coneAngle: 0.55,
     ambientLabel: 'Ночь · неон · лужи',
   },
   default: null,
@@ -157,20 +157,20 @@ export function drawMapAmbienceOverlay(ctx, mapConfig, time = 0) {
 
   const haze = ctx.createLinearGradient(0, 0, 0, mapH);
   if (isNight) {
-    haze.addColorStop(0, 'rgba(8, 12, 28, 0.5)');
-    haze.addColorStop(0.5, 'rgba(4, 6, 16, 0.15)');
-    haze.addColorStop(1, 'rgba(2, 4, 12, 0.55)');
+    haze.addColorStop(0, 'rgba(8, 12, 28, 0.28)');
+    haze.addColorStop(0.5, 'rgba(4, 6, 16, 0.08)');
+    haze.addColorStop(1, 'rgba(2, 4, 12, 0.3)');
   } else {
-    haze.addColorStop(0, 'rgba(30, 22, 10, 0.35)');
-    haze.addColorStop(0.5, 'rgba(10, 8, 4, 0.08)');
-    haze.addColorStop(1, 'rgba(20, 16, 8, 0.4)');
+    haze.addColorStop(0, 'rgba(30, 22, 10, 0.2)');
+    haze.addColorStop(0.5, 'rgba(10, 8, 4, 0.04)');
+    haze.addColorStop(1, 'rgba(20, 16, 8, 0.22)');
   }
   ctx.fillStyle = haze;
   ctx.fillRect(0, 0, mapW, mapH);
 
   if (isNight) {
     const pulse = 0.85 + Math.sin(time * 1.5) * 0.08;
-    ctx.fillStyle = `rgba(4, 8, 24, ${0.35 * pulse})`;
+    ctx.fillStyle = `rgba(4, 8, 24, ${0.18 * pulse})`;
     ctx.fillRect(0, 0, mapW, mapH);
   }
 }
