@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@400;500;700&family=Playfair+Display:ital,wght@1,600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Oswald:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/styles.css" />
@@ -17,8 +17,9 @@
   <body>
     <canvas id="festive-bg" aria-hidden="true"></canvas>
 
+    <button id="btn-mute" class="btn-mute" type="button" aria-label="Выключить звук">🔊</button>
+
     <div id="app">
-      <button id="btn-mute" class="btn-mute" type="button" aria-label="Выключить звук">🔊</button>
       <div class="game-frame">
         <div class="frame-corner tl"></div>
         <div class="frame-corner tr"></div>
@@ -73,23 +74,25 @@
           WASD · Shift бег · Мышь · ЛКМ · E лут · F аптечка · G граната · V дым
         </div>
       </div>
+    </div>
 
-      <div id="auth-screen" class="overlay">
-        <div class="overlay-glow"></div>
-        <div class="overlay-card auth-card">
-          <p class="tag">RAIDSIM ONLINE</p>
-          <h1><span class="title-main">Вход</span></h1>
-          <p class="subtitle">Гость — без сохранения, прогресс пропадёт при обновлении страницы. Google — схрон и уровень в облаке.</p>
-          <p id="firebase-hint" class="firebase-hint hidden">Google-вход: добавьте Firebase (см. web/FIREBASE_SETUP.md)</p>
-          <button id="btn-guest" type="button" class="btn secondary">Играть как гость</button>
-          <button id="btn-google" type="button" class="btn google-btn">
-            <span class="g-icon">G</span> Войти через Google
-          </button>
-        </div>
+    <div id="auth-screen" class="overlay hidden">
+      <div class="overlay-glow"></div>
+      <div class="overlay-card auth-card">
+        <p class="tag">RAIDSIM ONLINE</p>
+        <h1><span class="title-main">Вход</span></h1>
+        <p class="subtitle">Гость — без сохранения, прогресс пропадёт при обновлении страницы. Google — схрон и уровень в облаке.</p>
+        <p id="firebase-hint" class="firebase-hint hidden">Google-вход: добавьте Firebase (см. web/FIREBASE_SETUP.md)</p>
+        <button id="btn-guest" type="button" class="btn secondary">Играть как гость</button>
+        <button id="btn-google" type="button" class="btn google-btn">
+          <span class="g-icon">G</span> Войти через Google
+        </button>
       </div>
+    </div>
 
-      <div id="lobby-screen" class="lobby-screen hidden">
-        <div class="lobby-header">
+    <div id="lobby-screen" class="lobby-screen hidden">
+      <div class="lobby-shell">
+        <header class="lobby-header">
           <div class="lobby-profile">
             <div id="lobby-avatar" class="lobby-avatar">?</div>
             <div>
@@ -103,104 +106,102 @@
             <span id="guest-badge" class="guest-badge hidden">ГОСТЬ</span>
           </div>
           <button id="btn-logout" type="button" class="btn-logout">Выйти</button>
-        </div>
+        </header>
 
-        <div class="lobby-main">
-          <button id="btn-hideout" type="button" class="lobby-side-btn">УБЕЖИЩЕ</button>
-          <div class="lobby-center">
-            <canvas id="lobby-char" width="160" height="200"></canvas>
+        <div class="lobby-body">
+          <aside class="lobby-aside lobby-aside-left">
+            <button id="btn-hideout" type="button" class="lobby-side-btn">УБЕЖИЩЕ</button>
+          </aside>
+
+          <main class="lobby-center">
+            <canvas id="lobby-char" width="200" height="240"></canvas>
             <p id="loadout-info" class="loadout-info">Стандартный выход</p>
-          </div>
-          <div class="lobby-side-stack">
+          </main>
+
+          <aside class="lobby-aside lobby-aside-right">
             <button id="btn-stash" type="button" class="lobby-side-btn">СХРОН</button>
             <button id="btn-shop" type="button" class="lobby-side-btn">МАГАЗИН</button>
-          </div>
+          </aside>
         </div>
 
         <div id="quest-panel" class="quest-panel"></div>
 
-        <div class="lobby-modes">
-          <p class="modes-label">Карта</p>
-          <div id="map-list" class="mode-list"></div>
+        <div class="lobby-config">
+          <div class="lobby-modes">
+            <p class="modes-label">Карта</p>
+            <div id="map-list" class="mode-list"></div>
+          </div>
+          <div class="lobby-modes">
+            <p class="modes-label">Режим рейда</p>
+            <div id="mode-list" class="mode-list mode-list-3"></div>
+          </div>
         </div>
 
-        <div class="lobby-modes">
-          <p class="modes-label">Режим рейда</p>
-          <div id="mode-list" class="mode-list"></div>
-        </div>
-
-        <button id="btn-play" type="button" class="btn primary lobby-play">
-          <span class="btn-shine"></span>
-          В РЕЙД
-        </button>
-        <div id="lobby-toast" class="lobby-toast"></div>
+        <footer class="lobby-footer">
+          <button id="btn-play" type="button" class="btn primary lobby-play">В РЕЙД</button>
+        </footer>
       </div>
+      <div id="lobby-toast" class="lobby-toast"></div>
+    </div>
 
-      <div id="stash-modal" class="modal hidden">
-        <div class="modal-card">
-          <h2>Схрон</h2>
-          <div id="stash-grid" class="stash-grid"></div>
-          <button id="stash-close" type="button" class="btn secondary">Закрыть</button>
-        </div>
+    <div id="stash-modal" class="modal hidden">
+      <div class="modal-card">
+        <h2>Схрон</h2>
+        <div id="stash-grid" class="stash-grid"></div>
+        <button id="stash-close" type="button" class="btn secondary">Закрыть</button>
       </div>
+    </div>
 
-      <div id="hideout-modal" class="modal hidden">
-        <div class="modal-card">
-          <h2>Убежище</h2>
-          <div id="hideout-stats" class="hideout-stats"></div>
-          <button type="button" id="btn-stash-from-hideout" class="btn secondary">Схрон</button>
-          <button id="hideout-close" type="button" class="btn secondary">Закрыть</button>
-        </div>
+    <div id="hideout-modal" class="modal hidden">
+      <div class="modal-card">
+        <h2>Убежище</h2>
+        <div id="hideout-stats" class="hideout-stats"></div>
+        <button type="button" id="btn-stash-from-hideout" class="btn secondary">Схрон</button>
+        <button id="hideout-close" type="button" class="btn secondary">Закрыть</button>
       </div>
+    </div>
 
-      <div id="shop-modal" class="modal hidden">
-        <div class="modal-card">
-          <h2>Магазин</h2>
-          <p class="modal-hint">Покупки применяются к следующему рейду</p>
-          <div id="shop-list" class="shop-list"></div>
-          <button id="shop-close" type="button" class="btn secondary">Закрыть</button>
-        </div>
+    <div id="shop-modal" class="modal hidden">
+      <div class="modal-card">
+        <h2>Магазин</h2>
+        <p class="modal-hint">Покупки применяются к следующему рейду</p>
+        <div id="shop-list" class="shop-list"></div>
+        <button id="shop-close" type="button" class="btn secondary">Закрыть</button>
       </div>
+    </div>
 
-      <div id="overlay" class="overlay hidden">
-        <div class="overlay-glow"></div>
-        <div class="overlay-card">
-          <div class="festive-ribbon">✦ Праздничный рейд ✦</div>
-          <p class="tag">ESCAPE FROM CUBES</p>
-          <h1>
-            <span class="title-main">RaidSim</span>
-            <span class="title-sub">Online</span>
-          </h1>
-          <p class="festive-greeting">Добро пожаловать в Норвинскую ночь — карта 4×4 ждёт.</p>
-          <p class="subtitle">
-            Собери лут за кубиками-укрытиями, переживи Scav'ов и выйди через зелёную зону экстракта до конца таймера.
-          </p>
-          <ul class="features">
-            <li><span>🎯</span> Топдаун-шутер в духе Таркова</li>
-            <li><span>📦</span> Лут, патроны, броня и аптечки</li>
-            <li><span>⏳</span> 8 минут на рейд — не опоздай на экстракт</li>
-            <li><span>💀</span> Умер — весь лут остался на карте</li>
-          </ul>
-          <button id="btn-start" class="btn primary">
-            <span class="btn-shine"></span>
-            НАЧАТЬ РЕЙД
-          </button>
-          <p class="deploy-note">alimfrontend.github.io/RaidSim-Online</p>
-        </div>
+    <div id="overlay" class="overlay hidden">
+      <div class="overlay-glow"></div>
+      <div class="overlay-card">
+        <div class="festive-ribbon">◆ Тактический рейд ◆</div>
+        <p class="tag">ESCAPE FROM CUBES</p>
+        <h1>
+          <span class="title-main">RaidSim</span>
+          <span class="title-sub">Online</span>
+        </h1>
+        <p class="festive-greeting">Сектор Норвинск. Карта 4×4. Выйди живым.</p>
+        <p class="subtitle">
+          Собери лут за кубиками-укрытиями, переживи Scav'ов и выйди через зелёную зону экстракта до конца таймера.
+        </p>
+        <ul class="features">
+          <li><span>🎯</span> Топдаун-шутер в духе Таркова</li>
+          <li><span>📦</span> Лут, патроны, броня и аптечки</li>
+          <li><span>⏳</span> 8 минут на рейд — не опоздай на экстракт</li>
+          <li><span>💀</span> Умер — весь лут остался на карте</li>
+        </ul>
+        <button id="btn-start" class="btn primary">НАЧАТЬ РЕЙД</button>
+        <p class="deploy-note">alimfrontend.github.io/RaidSim-Online</p>
       </div>
+    </div>
 
-      <div id="end-screen" class="overlay hidden">
-        <div class="overlay-glow"></div>
-        <div class="overlay-card end">
-          <p class="tag" id="end-tag">MIA</p>
-          <h1 id="end-title">ТЫ ПОГИБ</h1>
-          <p id="end-desc">Весь лут остался на карте.</p>
-          <div id="end-loot" class="end-loot"></div>
-          <button id="btn-retry" class="btn primary">
-            <span class="btn-shine"></span>
-            НОВЫЙ РЕЙД
-          </button>
-        </div>
+    <div id="end-screen" class="overlay hidden">
+      <div class="overlay-glow"></div>
+      <div class="overlay-card end">
+        <p class="tag" id="end-tag">MIA</p>
+        <h1 id="end-title">ТЫ ПОГИБ</h1>
+        <p id="end-desc">Весь лут остался на карте.</p>
+        <div id="end-loot" class="end-loot"></div>
+        <button id="btn-retry" class="btn primary">В ЛОББИ</button>
       </div>
     </div>
 

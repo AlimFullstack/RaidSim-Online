@@ -1,4 +1,4 @@
-const COLORS = ['#ffd700', '#ff6b6b', '#2ecc71', '#c9a227', '#e8d5b5', '#ffffff', '#ff9ff3'];
+const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
 export class FestiveBackground {
   constructor(canvas) {
@@ -45,9 +45,9 @@ export class FestiveBackground {
       canvas.height * 0.5,
       canvas.width * 0.8
     );
-    grad.addColorStop(0, 'rgba(201, 162, 39, 0.08)');
-    grad.addColorStop(0.5, 'rgba(20, 24, 16, 0.4)');
-    grad.addColorStop(1, 'rgba(5, 7, 4, 0.9)');
+    grad.addColorStop(0, 'rgba(58, 68, 52, 0.12)');
+    grad.addColorStop(0.5, 'rgba(10, 12, 10, 0.5)');
+    grad.addColorStop(1, 'rgba(4, 5, 4, 0.95)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 

@@ -323,26 +323,26 @@ export class Lobby {
     ctx.clearRect(0, 0, w, h);
 
     const grd = ctx.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, 70);
-    grd.addColorStop(0, 'rgba(201, 162, 39, 0.25)');
+    grd.addColorStop(0, 'rgba(74, 90, 66, 0.2)');
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.beginPath();
     ctx.ellipse(w / 2, h * 0.72, 28, 12, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#c9a227';
+    ctx.fillStyle = '#5a6a52';
     ctx.beginPath();
     ctx.arc(w / 2, h * 0.55, 22, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#2c2418';
+    ctx.fillStyle = '#1a1e18';
     ctx.fillRect(w / 2 + 8, h * 0.55 - 4, 20, 8);
 
     if (this.profile?.loadout?.startArmor) {
-      ctx.strokeStyle = '#5dade2';
+      ctx.strokeStyle = '#4a6a7a';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(w / 2, h * 0.55, 28, 0, Math.PI * 2);
