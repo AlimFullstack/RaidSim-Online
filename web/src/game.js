@@ -13,7 +13,9 @@ import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
+import { canSeePoint } from './visibility.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
+import { lootTotalValue } from './inventory-core.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
 
 const INTERACT_RADIUS = 50;
@@ -37,7 +39,7 @@ export class Game {
     this.statusTimer = 0;
     this.lastTime = 0;
     this.animTime = 0;
-    this.raidTimeLeft = 480;
+    this.raidTimeLeft = 300;
     this.bullets = [];
     this.lootPoints = [];
     this.scavs = [];
@@ -77,13 +79,8 @@ export class Game {
     this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
     const walls = this.activeMap.walls;
-    const weaponId = loadout.weapon || 'pm';
-    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls, weaponId);
-    this.player.initRaidInventory(weaponId, loadout);
-    if (loadout.startArmor) {
-      this.player.armor += loadout.startArmor;
-      this.player.maxArmor = loadout.startArmor;
-    }
+    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls, 'pm');
+    this.player.initRaidInventory(loadout);
     this.lootPoints = this.activeMap.lootPoints.map((p) => new LootPoint(p.x, p.y, p.tier));
     this.scavs = this.activeMap.scavSpawns.map((s) => new Scav(s.x, s.y, walls));
     if (mode === 'boss' && this.activeMap.bossSpawn) {
@@ -324,7 +321,7 @@ export class Game {
     this.updateBullets(dt);
 
     if (p.dead && !this.playerCorpse) {
-      this.playerCorpse = new PlayerCorpse(p.x, p.y, [...p.inventory]);
+      this.playerCorpse = new PlayerCorpse(p.x, p.y, p.getCarriedLoot());
       this.audio?.play('death');
       this.fx.bloodBurst(p.x, p.y);
       this.endRaid('dead', 'ТЫ ПОГИБ', 'PMC уничтожен. Лут остался на карте.');
@@ -338,6 +335,13 @@ export class Game {
     this.input.endFrame();
   }
 
+  canSee(wx, wy) {
+    const p = this.player;
+    if (!p || p.dead || !this.activeMap) return false;
+    const theme = getMapTheme(this.activeMap.theme);
+    return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme);
+  }
+
   findNearestInteractable() {
     const p = this.player;
     let best = null;
@@ -345,13 +349,15 @@ export class Game {
 
     if (this.playerCorpse && !this.playerCorpse.looted) {
       const d = dist(p.x, p.y, this.playerCorpse.x, this.playerCorpse.y);
-      if (d < INTERACT_RADIUS) best = { type: 'pmc', target: this.playerCorpse, x: this.playerCorpse.x, y: this.playerCorpse.y, d };
+      if (d < INTERACT_RADIUS && this.canSee(this.playerCorpse.x, this.playerCorpse.y)) {
+        best = { type: 'pmc', target: this.playerCorpse, x: this.playerCorpse.x, y: this.playerCorpse.y, d };
+      }
     }
 
     for (const scav of this.scavs) {
       if (!scav.dead || scav.looted) continue;
       const d = dist(p.x, p.y, scav.x, scav.y);
-      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity) && this.canSee(scav.x, scav.y)) {
         best = { type: 'corpse', target: scav, x: scav.x, y: scav.y, d };
       }
     }
@@ -359,14 +365,14 @@ export class Game {
     for (const lp of this.lootPoints) {
       if (lp.searched) continue;
       const d = dist(p.x, p.y, lp.x, lp.y);
-      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity) && this.canSee(lp.x, lp.y)) {
         best = { type: 'loot', target: lp, x: lp.x, y: lp.y, d };
       }
     }
 
     for (const gi of this.groundItems) {
       const d = dist(p.x, p.y, gi.x, gi.y);
-      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity) && this.canSee(gi.x, gi.y)) {
         best = { type: 'ground', target: gi, x: gi.x, y: gi.y, d };
       }
     }
@@ -479,7 +485,7 @@ export class Game {
         this.fx.extractPulse(p.x, p.y);
       }
       if (p.extractProgress >= EXTRACT_TIME) {
-        const value = p.inventory.filter((i) => !i.starter).reduce((s, i) => s + (i.value || 0), 0);
+        const value = p.getLootValue();
         this.endRaid('extracted', 'РЕЙД УСПЕШЕН', `Убийств: ${p.kills}. Лут: ${value}₽`, true);
       }
     } else {
@@ -545,13 +551,14 @@ export class Game {
     this.state = 'ended';
     this.inventoryUi?.toggle(false);
     const p = this.player;
-    const lootValue = p.inventory.filter((i) => !i.starter).reduce((s, i) => s + (i.value || 0), 0);
-    const lootCount = p.inventory.filter((i) => !i.starter).length;
+    const loot = survived ? p.getCarriedLoot() : [];
+    const lootValue = lootTotalValue(loot);
+    const lootCount = loot.length;
     this.endPayload = {
       type,
       title,
       desc,
-      loot: survived ? p.inventory.filter((i) => !i.starter) : [],
+      loot,
       lootValue,
       kills: p.kills,
       mode: this.raidMode,
@@ -603,7 +610,7 @@ export class Game {
 
   drawInteractHint(ctx) {
     const near = this.nearestInteract;
-    if (!near || this.state !== 'raid') return;
+    if (!near || this.state !== 'raid' || !this.canSee(near.x, near.y)) return;
     const labels = { corpse: 'E — обыск Scav', loot: 'E — поиск лута', pmc: 'E — обыск тела', ground: 'E — подобрать' };
     const label = labels[near.type];
     ctx.font = '12px JetBrains Mono';
@@ -624,12 +631,24 @@ export class Game {
 
     ctx.setTransform(this.scale, 0, 0, this.scale, -this.camRenderX * this.scale, -this.camRenderY * this.scale);
     drawMap(ctx, this.animTime, this.activeMap);
-    for (const s of this.smokeZones) s.draw(ctx);
-    for (const lp of this.lootPoints) lp.draw(ctx);
-    for (const scav of this.scavs) scav.draw(ctx);
-    if (this.playerCorpse) this.playerCorpse.draw(ctx);
-    for (const gi of this.groundItems) gi.draw(ctx);
-    for (const b of this.bullets) b.draw(ctx);
+    for (const s of this.smokeZones) {
+      if (this.canSee(s.x, s.y)) s.draw(ctx);
+    }
+    for (const lp of this.lootPoints) {
+      if (this.canSee(lp.x, lp.y)) lp.draw(ctx);
+    }
+    for (const scav of this.scavs) {
+      if (this.canSee(scav.x, scav.y)) scav.draw(ctx);
+    }
+    if (this.playerCorpse && this.canSee(this.playerCorpse.x, this.playerCorpse.y)) {
+      this.playerCorpse.draw(ctx);
+    }
+    for (const gi of this.groundItems) {
+      if (this.canSee(gi.x, gi.y)) gi.draw(ctx);
+    }
+    for (const b of this.bullets) {
+      if (this.canSee(b.x, b.y)) b.draw(ctx);
+    }
     this.fx.drawWorld(ctx);
     this.fx.drawRaidFog(ctx, this);
     if (this.player && !this.player.dead) this.player.draw(ctx);
@@ -689,7 +708,7 @@ export function createUI() {
   const muteBtn = document.getElementById('btn-mute');
 
   function invCacheKey(p) {
-    return `${p.inventory.length}|${p.selectedSlot}|${p.canShoot() ? p.weaponId : '-'}|${p.inventory.map((i) => i?.uid || i?.id).join(',')}`;
+    return `${p.backpackFilledCount()}|${p.selectedSlot}|${p.canShoot() ? p.weaponId : '-'}|${p.backpack.map((i) => i?.uid || i?.id || '-').join(',')}`;
   }
 
   return {
@@ -770,7 +789,7 @@ export function createUI() {
       }
       const hintEl = document.getElementById('active-slot-hint');
       if (hintEl) hintEl.textContent = p.getSlotActionHint();
-      document.getElementById('inv-count').textContent = `${p.inventory.length}/${p.maxInv}`;
+      document.getElementById('inv-count').textContent = `${p.backpackFilledCount()}/${p.maxInv}`;
       const armorEl = document.getElementById('armor-bar');
       const armorText = document.getElementById('armor-text');
       if (armorEl) armorEl.style.width = `${p.maxArmor > 0 ? (p.armor / p.maxArmor) * 100 : 0}%`;
@@ -782,12 +801,13 @@ export function createUI() {
         const slots = document.getElementById('inv-slots');
         slots.innerHTML = '';
         for (let i = 0; i < p.maxInv; i++) {
-          const item = p.inventory[i];
+          const item = p.backpack[i];
           const div = document.createElement('div');
           div.className = 'slot' + (item ? ' filled' : '') + (i === p.selectedSlot ? ' selected' : '');
           div.dataset.idx = String(i);
+          const countBadge = item?.count > 1 ? ` ×${item.count}` : '';
           div.innerHTML = item
-            ? `<span class="slot-num">${i + 1}</span><span class="slot-ico">${itemIcon(item)}</span><span class="slot-name">${item.name.slice(0, 8)}</span>`
+            ? `<span class="slot-num">${i + 1}</span><span class="slot-ico">${itemIcon(item)}</span><span class="slot-name">${item.name.slice(0, 6)}${countBadge}</span>`
             : `<span class="slot-num">${i + 1}</span><span class="slot-ico">·</span><span class="slot-name">—</span>`;
           div.title = item ? slotItemHint(item) : 'Пустой слот';
           div.addEventListener('click', () => {

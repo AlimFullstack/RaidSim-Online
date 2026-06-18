@@ -579,7 +579,7 @@ body {
 }
 
 .inv-slots.hotbar {
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
 }
 
@@ -665,6 +665,113 @@ body {
 .inv-overlay-full .inv-panel {
   width: min(520px, 94vw);
   max-height: 80vh;
+}
+
+.inv-overlay-full .inv-panel-wide {
+  width: min(560px, 94vw);
+}
+
+.inv-overlay-body {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 14px;
+}
+
+.inv-overlay-equip,
+.inv-overlay-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inv-section-label {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.inv-backpack-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.inv-slot {
+  position: relative;
+  min-height: 72px;
+  padding: 8px;
+  border: 1px dashed #2a3228;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.inv-slot.filled {
+  border-style: solid;
+  border-color: var(--border);
+}
+
+.inv-slot.selected {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px rgba(46, 204, 113, 0.25);
+}
+
+.inv-slot.drop-target {
+  border-color: #5dade2;
+  background: rgba(93, 173, 226, 0.12);
+}
+
+.inv-slot.dragging {
+  opacity: 0.5;
+}
+
+.inv-slot .slot-num {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.inv-slot .slot-ico {
+  font-size: 18px;
+}
+
+.inv-slot .slot-name {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.inv-slot .slot-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stack-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 10px;
+  color: #7ec8ff;
+  font-weight: 600;
+}
+
+.equip-slot {
+  min-height: 64px;
+}
+
+.inv-slot .inv-drop-btn {
+  margin-top: auto;
+  font-size: 9px;
+  padding: 2px 6px;
+  align-self: flex-start;
+}
+
+@media (max-width: 520px) {
+  .inv-overlay-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 .inv-overlay-full .inv-overlay-list {

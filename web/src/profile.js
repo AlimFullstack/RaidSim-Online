@@ -1,15 +1,24 @@
+import { evaluateQuest, applyQuestReward, pickRandomQuest } from './quests.js';
+import {
+  addToStash,
+  emptyBackpack,
+  stackItems,
+  lootTotalValue,
+  ensureMigratedProfile,
+} from './inventory-core.js';
+
 export const RAID_MODES = {
-  standard: { id: 'standard', name: 'Стандарт', duration: 8 * 60, desc: '8 минут, полный лут' },
-  quick: { id: 'quick', name: 'Быстрый', duration: 5 * 60, desc: '5 минут, +20% XP' },
+  standard: { id: 'standard', name: 'Стандарт', duration: 5 * 60, desc: '5 минут, полный лут' },
+  quick: { id: 'quick', name: 'Быстрый', duration: 2 * 60, desc: '2 минуты, +20% XP' },
   boss: { id: 'boss', name: 'Босс-рейд', duration: 10 * 60, desc: 'Босс в центре, редкий лут' },
 };
 
 export const SHOP_ITEMS = [
-  { id: 'medkit', name: 'Аптечка', cost: 50, loadoutKey: 'extraMedkits', amount: 1 },
-  { id: 'ammo', name: 'Патроны +12', cost: 30, loadoutKey: 'extraAmmo', amount: 12 },
-  { id: 'armor', name: 'Броня на рейд', cost: 100, loadoutKey: 'startArmor', amount: 25 },
-  { id: 'shotgun', name: 'Дробовик', cost: 180, type: 'weapon', weaponId: 'shotgun' },
-  { id: 'ak', name: 'АК-74', cost: 350, type: 'weapon', weaponId: 'ak' },
+  { id: 'medkit', name: 'Аптечка', cost: 50, item: { id: 'medkit', name: 'Аптечка', heal: 50, consumable: true, value: 0 } },
+  { id: 'ammo', name: 'Патроны +12', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 12, value: 0 } },
+  { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 25, value: 8 } },
+  { id: 'shotgun', name: 'Дробовик', cost: 180, item: { id: 'shotgun', name: 'Дробовик', weapon: 'shotgun', value: 12 } },
+  { id: 'ak', name: 'АК-74', cost: 350, item: { id: 'ak', name: 'АК-74', weapon: 'ak', value: 20 } },
 ];
 
 export function xpToLevel(xp) {
@@ -34,7 +43,7 @@ export function createDefaultProfile(overrides = {}) {
     xp: 0,
     rubles: 0,
     stash: { items: [] },
-    loadout: { weapon: 'pm', extraMedkits: 0, extraAmmo: 0, startArmor: 0 },
+    loadout: { backpack: emptyBackpack() },
     stats: { raids: 0, extracts: 0, kills: 0, totalLootValue: 0 },
     quests: { active: null, completed: [] },
     hideout: { level: 1 },
@@ -42,20 +51,25 @@ export function createDefaultProfile(overrides = {}) {
   };
 }
 
-import { evaluateQuest, applyQuestReward, pickRandomQuest } from './quests.js';
-
 export function applyRaidResult(profile, result) {
-  let p = { ...profile, stash: { items: [...profile.stash.items] }, loadout: { ...profile.loadout }, stats: { ...profile.stats }, quests: { ...profile.quests } };
+  let p = ensureMigratedProfile({
+    ...profile,
+    stash: { items: [...profile.stash.items] },
+    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())] },
+    stats: { ...profile.stats },
+    quests: { ...profile.quests },
+  });
+
   p.stats.raids += 1;
   p.stats.kills += result.kills || 0;
 
   if (result.type === 'extracted') {
     p.stats.extracts += 1;
     let lootValue = 0;
-    for (const item of result.loot) {
-      lootValue += item.value || 0;
-      if (p.stash.items.length < 24) p.stash.items.push(item);
-      else lootValue += item.value || 0;
+    for (const item of result.loot || []) {
+      const added = addToStash(p.stash, item, item.count || 1);
+      if (!added.ok) lootValue += (item.value || 0) * (item.count || 1);
+      else lootValue += (item.value || 0) * (item.count || 1);
     }
     p.stats.totalLootValue += lootValue;
     p.rubles += lootValue;
@@ -63,8 +77,6 @@ export function applyRaidResult(profile, result) {
     if (result.mode === 'quick') xpGain = Math.floor(xpGain * 1.2);
     p.xp += xpGain;
   }
-
-  p.loadout = { weapon: p.loadout.weapon || 'pm', extraMedkits: 0, extraAmmo: 0, startArmor: 0 };
 
   const questResult = evaluateQuest(p, result);
   if (questResult.completed && questResult.quest) {
@@ -78,22 +90,29 @@ export function applyRaidResult(profile, result) {
 }
 
 export function buyShopItem(profile, shopId) {
-  const item = SHOP_ITEMS.find((i) => i.id === shopId);
-  if (!item || profile.rubles < item.cost) return { ok: false, msg: 'Недостаточно рублей' };
-  const p = { ...profile, loadout: { ...profile.loadout }, rubles: profile.rubles - item.cost };
-  if (item.type === 'weapon') {
-    p.loadout.weapon = item.weaponId;
-    return { ok: true, profile: p, msg: `На рейд: ${item.name}` };
-  }
-  p.loadout[item.loadoutKey] = (p.loadout[item.loadoutKey] || 0) + item.amount;
-  return { ok: true, profile: p, msg: `Куплено: ${item.name}` };
+  const shop = SHOP_ITEMS.find((i) => i.id === shopId);
+  if (!shop || profile.rubles < shop.cost) return { ok: false, msg: 'Недостаточно рублей' };
+  const p = ensureMigratedProfile({
+    ...profile,
+    stash: { items: [...profile.stash.items] },
+    rubles: profile.rubles - shop.cost,
+  });
+  const added = addToStash(p.stash, shop.item, 1);
+  if (!added.ok) return { ok: false, msg: added.msg };
+  return { ok: true, profile: p, msg: `${shop.name} → схрон` };
 }
 
 export function sellStashItem(profile, index) {
-  const p = { ...profile, stash: { items: [...profile.stash.items] } };
+  const p = ensureMigratedProfile({
+    ...profile,
+    stash: { items: [...profile.stash.items] },
+  });
   const item = p.stash.items[index];
   if (!item) return { ok: false, msg: 'Нет предмета' };
-  p.rubles += item.value || 1;
+  const value = (item.value || 1) * (item.count || 1);
+  p.rubles += value;
   p.stash.items.splice(index, 1);
-  return { ok: true, profile: p, msg: `Продано: ${item.name}` };
+  return { ok: true, profile: p, msg: `Продано: ${item.name}${item.count > 1 ? ` ×${item.count}` : ''}` };
 }
+
+export { ensureMigratedProfile, lootTotalValue, stackItems, emptyBackpack };

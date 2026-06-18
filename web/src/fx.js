@@ -1,4 +1,5 @@
 import { getMapTheme } from './map-atmosphere.js';
+import { computeVisionPolygon, fillVisionPolygon } from './visibility.js';
 
 const COLORS = ['#4a5a42', '#6a7264', '#3a4a38', '#8a9a7a', '#2a3228', '#5a6a52', '#7a8a6a'];
 
@@ -433,46 +434,25 @@ export class GameFx {
     if (!p || p.dead || game.state !== 'raid') return;
 
     const theme = getMapTheme(game.activeMap?.theme);
+    const walls = game.activeMap?.walls || [];
     const viewW = game.canvas.width / game.scale;
     const viewH = game.canvas.height / game.scale;
-    const aim = p.angle;
-    const vision = theme.visionRadius;
-    const coneRange = theme.coneRange;
-    const coneAngle = theme.coneAngle;
-
     const camX = game.camRenderX ?? game.camX;
     const camY = game.camRenderY ?? game.camY;
+
+    const visionPoly = computeVisionPolygon(p.x, p.y, p.angle, walls, theme);
 
     ctx.save();
     ctx.fillStyle = theme.fogColor;
     ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
 
     ctx.globalCompositeOperation = 'destination-out';
-
-    const foot = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, vision);
-    foot.addColorStop(0, 'rgba(0,0,0,1)');
-    foot.addColorStop(0.4, 'rgba(0,0,0,0.75)');
-    foot.addColorStop(0.72, 'rgba(0,0,0,0.28)');
-    foot.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = foot;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, vision, 0, Math.PI * 2);
-    ctx.fill();
-
-    const coneGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, coneRange);
-    coneGrad.addColorStop(0, 'rgba(0,0,0,1)');
-    coneGrad.addColorStop(0.55, 'rgba(0,0,0,0.5)');
-    coneGrad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = coneGrad;
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.arc(p.x, p.y, coneRange, aim - coneAngle, aim + coneAngle);
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    fillVisionPolygon(ctx, visionPoly, p.x, p.y);
 
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = theme.fogTint;
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = 0.4;
     ctx.fillRect(camX - 20, camY - 20, viewW + 40, viewH + 40);
     ctx.globalAlpha = 1;
     ctx.restore();

@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import { firebaseConfig, isFirebaseConfigured } from './firebase-config.js';
-import { createDefaultProfile } from './profile.js';
+import { createDefaultProfile, ensureMigratedProfile } from './profile.js';
 import { normalizeQuestRef } from './quests.js';
 
 let app = null;
@@ -61,10 +61,7 @@ export function serializeProfile(profile) {
       active: normalizeQuestRef(profile.quests?.active),
     },
     loadout: {
-      extraMedkits: profile.loadout?.extraMedkits || 0,
-      extraAmmo: profile.loadout?.extraAmmo || 0,
-      startArmor: profile.loadout?.startArmor || 0,
-      ...(profile.loadout?.weapon ? { weapon: profile.loadout.weapon } : {}),
+      backpack: profile.loadout?.backpack || [null, null, null, null],
     },
   });
   return data;
@@ -73,7 +70,7 @@ export function serializeProfile(profile) {
 function hydrateProfile(data, user) {
   const base = createDefaultProfile();
   const quests = data.quests || base.quests;
-  return {
+  const merged = ensureMigratedProfile({
     ...base,
     ...data,
     isGuest: false,
@@ -83,7 +80,8 @@ function hydrateProfile(data, user) {
       completed: quests.completed || [],
       active: normalizeQuestRef(quests.active),
     },
-  };
+  });
+  return merged;
 }
 
 export class AuthService {
@@ -178,7 +176,8 @@ export class ProfileStorage {
 
   async load() {
     if (this.auth.isGuest()) {
-      return this.auth.guestProfile || createDefaultProfile({ displayName: 'Гость', isGuest: true });
+      const g = this.auth.guestProfile || createDefaultProfile({ displayName: 'Гость', isGuest: true });
+      return ensureMigratedProfile(g);
     }
 
     if (!this.auth.isLoggedIn() || !ensureFirebase()) {

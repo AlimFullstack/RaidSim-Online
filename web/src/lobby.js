@@ -7,10 +7,14 @@ import {
   sellStashItem,
   applyRaidResult,
   getSurvivalRate,
+  ensureMigratedProfile,
 } from './profile.js';
 import { getMapList, getMapById } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
+import { emptyBackpack, cloneBackpack } from './inventory-core.js';
+import { itemIcon } from './inventory-ui.js';
+import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
 
 const SHOP_ICONS = { medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
 const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
@@ -51,6 +55,7 @@ export class Lobby {
     };
 
     this.bindEvents();
+    setupLobbyDrag(this);
     this.renderModes();
     this.renderMaps();
     this.renderShop();
@@ -231,14 +236,12 @@ export class Lobby {
   renderShop() {
     if (!this.el.shopList || !this.profile) return;
     const rubles = this.profile.rubles;
-    const equippedWeapon = this.profile.loadout?.weapon || 'pm';
     this.el.shopList.innerHTML = SHOP_ITEMS.map((item) => {
       const afford = rubles >= item.cost;
-      const equipped = item.type === 'weapon' && item.weaponId === equippedWeapon;
       return `
-      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}${equipped ? ' shop-card--equipped' : ''}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
+      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
         <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
-        <span class="shop-card-name">${item.name}${equipped ? ' ✓' : ''}</span>
+        <span class="shop-card-name">${item.name}</span>
         <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
         <span class="shop-card-cost">${item.cost} ₽</span>
       </button>`;
@@ -260,19 +263,19 @@ export class Lobby {
   }
 
   shopEffectDesc(item) {
-    if (item.type === 'weapon') {
-      const w = getWeapon(item.weaponId);
-      return `Оружие на рейд · урон ${w.damage} · маг. ${w.magSize}`;
+    if (item.item?.weapon) {
+      const w = getWeapon(item.item.weapon);
+      return `В схрон · урон ${w.damage} · маг. ${w.magSize}`;
     }
-    if (item.loadoutKey === 'extraMedkits') return '+1 аптечка к рейду';
-    if (item.loadoutKey === 'extraAmmo') return `+${item.amount} патронов`;
-    if (item.loadoutKey === 'startArmor') return `+${item.amount} брони на старт`;
-    return '';
+    if (item.item?.heal) return 'В схрон · аптечка';
+    if (item.item?.ammo) return `В схрон · +${item.item.ammo} патронов`;
+    if (item.item?.armor) return `В схрон · броня +${item.item.armor}`;
+    return 'В схрон';
   }
 
   async enterGuest() {
     await this.auth.signInGuest();
-    this.profile = await this.storage.load();
+    this.profile = ensureMigratedProfile(await this.storage.load());
     if (!this.profile.quests?.active) {
       this.profile.quests = { active: pickRandomQuest([]), completed: [] };
     }
@@ -282,7 +285,7 @@ export class Lobby {
   async enterGoogle() {
     try {
       await this.auth.signInGoogle();
-      this.profile = await this.storage.load();
+      this.profile = ensureMigratedProfile(await this.storage.load());
       if (!this.profile.quests?.active) {
         this.profile.quests = {
           active: pickRandomQuest(this.profile.quests?.completed || []),
@@ -351,13 +354,19 @@ export class Lobby {
   }
 
   async refreshProfile() {
-    this.profile = await this.storage.load();
+    this.profile = ensureMigratedProfile(await this.storage.load());
     this.render();
   }
 
-  play() {
+  async play() {
     if (!this.profile) return;
-    this.callbacks.onPlay(this.selectedMode, this.profile.loadout, this.selectedMap);
+    const backpack = cloneBackpack(this.profile.loadout?.backpack || emptyBackpack());
+    this.profile = {
+      ...this.profile,
+      loadout: { backpack: emptyBackpack() },
+    };
+    if (!this.auth.isGuest()) await this.persistProfile(null);
+    this.callbacks.onPlay(this.selectedMode, { backpack }, this.selectedMap);
   }
 
   renderStash() {
@@ -370,16 +379,17 @@ export class Lobby {
     }
 
     if (!items.length) {
-      this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. E — лут в слоты, кнопка РЮКЗАК — панель, экстракт — в схрон.</p>';
+      this.el.stashGrid.innerHTML = '<p class="empty-stash">Схрон пуст. Купи у торговца или вынеси лут с рейда. Перетащи в рюкзак оператора (4 слота).</p>';
       return;
     }
 
     this.el.stashGrid.innerHTML = items
       .map(
         (item, i) => `
-      <div class="stash-cell">
-        <span class="stash-cell-name">${item.name}</span>
-        <span class="stash-cell-value">${item.value || 0} ₽</span>
+      <div class="stash-cell inv-slot filled" draggable="true" data-stash-idx="${i}" data-drop-zone="stash" title="Перетащи в рюкзак оператора">
+        <span class="slot-ico">${itemIcon(item)}</span>
+        <span class="stash-cell-name">${item.name}${item.count > 1 ? ` ×${item.count}` : ''}</span>
+        <span class="stash-cell-value">${(item.value || 0) * (item.count || 1)} ₽</span>
         <button type="button" class="sell-btn" data-idx="${i}">Продать</button>
       </div>`
       )
@@ -402,7 +412,7 @@ export class Lobby {
 
   getStashInfo() {
     const items = this.profile?.stash?.items || [];
-    const totalValue = items.reduce((s, i) => s + (i.value || 0), 0);
+    const totalValue = items.reduce((s, i) => s + (i.value || 0) * (i.count || 1), 0);
     return { count: items.length, totalValue };
   }
 
@@ -458,28 +468,26 @@ export class Lobby {
 
   renderOperatorSlots() {
     const el = this.el.slotsLeft;
-    if (!el) return;
-    const ld = this.profile?.loadout || {};
-    const weapon = getWeapon(ld.weapon || 'pm');
-    const { count: stashCount } = this.getStashInfo();
+    if (!el || !this.profile) return;
+    const bp = this.profile.loadout?.backpack || emptyBackpack();
+    const used = bp.filter(Boolean).length;
 
-    const slot = (icon, label, value, filled) => `
-      <div class="equip-slot ${filled ? 'filled' : ''}" title="${label}: ${value}">
-        <div class="slot-row">
-          <span class="slot-icon">${icon}</span>
-          <span class="slot-label">${label}</span>
-        </div>
-        <span class="slot-value">${value}</span>
-      </div>`;
-
-    el.innerHTML = [
-      slot('🔫', 'ОРУЖИЕ', weapon.name, true),
-      slot('🛡', 'БРОНЯ', ld.startArmor ? `${ld.startArmor} HP` : '—', !!ld.startArmor),
-      slot('💊', 'АПТЕЧКИ', ld.extraMedkits ? `+${ld.extraMedkits}` : '—', !!ld.extraMedkits),
-      slot('🔋', 'ПАТРОНЫ', ld.extraAmmo ? `+${ld.extraAmmo}` : '—', !!ld.extraAmmo),
-      slot('🎒', 'РЮКЗАК', '6 слотов', true),
-      slot('📦', 'СХРОН', `${stashCount}/24`, stashCount > 0),
-    ].join('');
+    el.innerHTML = `
+      <p class="operator-pack-label">РЮКЗАК НА РЕЙД <span>${used}/4</span></p>
+      <p class="operator-pack-hint">Перетащи из вкладки СХРОН · по 1 шт.</p>
+      <div class="loadout-slots-grid">
+        ${bp.map((item, i) => `
+          <div class="inv-slot loadout-slot ${item ? 'filled' : ''}"
+               data-loadout-idx="${i}"
+               data-drop-zone="loadout"
+               data-slot="${i}"
+               draggable="${item ? 'true' : 'false'}"
+               title="${item ? item.name : 'Пустой слот'}">
+            <span class="slot-num">${i + 1}</span>
+            ${renderInvSlotContent(item)}
+          </div>`).join('')}
+      </div>
+      <p class="operator-starter-note">ПМ выдаётся бесплатно · не занимает слот</p>`;
   }
 
   renderQuestCard() {
@@ -511,13 +519,10 @@ export class Lobby {
     if (!this.el.briefing || !this.profile) return;
     const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
-    const ld = this.profile.loadout || {};
-    const weapon = getWeapon(ld.weapon || 'pm');
-
-    const equipParts = [weapon.name];
-    if (ld.extraMedkits) equipParts.push(`+${ld.extraMedkits} аптечки`);
-    if (ld.extraAmmo) equipParts.push(`+${ld.extraAmmo} патронов`);
-    if (ld.startArmor) equipParts.push(`броня ${ld.startArmor}`);
+    const bp = this.profile.loadout?.backpack || emptyBackpack();
+    const packItems = bp.filter(Boolean).map((i) => `${i.name}${i.count > 1 ? ` ×${i.count}` : ''}`);
+    const equipParts = ['ПМ (старт)'];
+    if (packItems.length) equipParts.push(...packItems);
 
     const threat =
       this.selectedMode === 'boss'
@@ -543,8 +548,8 @@ export class Lobby {
         <span class="briefing-value">${map.desc}</span>
       </div>
       <div class="briefing-row">
-        <span class="briefing-label">Экипировка</span>
-        <span class="briefing-value">${equipParts.join(', ')}</span>
+        <span class="briefing-label">Рюкзак</span>
+        <span class="briefing-value">${packItems.length ? equipParts.join(', ') : 'Пусто — только ПМ'}</span>
       </div>
     `;
   }
@@ -612,7 +617,7 @@ export class Lobby {
     ctx.fillStyle = '#1a1e18';
     ctx.fillRect(w / 2 + 30, bodyY + 48, 36, 8);
 
-    if (this.profile?.loadout?.startArmor) {
+    if (this.profile?.loadout?.backpack?.some((i) => i?.armor)) {
       ctx.strokeStyle = '#5a7a8a';
       ctx.lineWidth = 3;
       ctx.beginPath();

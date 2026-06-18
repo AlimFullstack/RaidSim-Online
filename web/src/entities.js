@@ -14,6 +14,14 @@ import {
 } from './map-core.js';
 import { getWeapon, calcSpread, getMuzzleOffset } from './weapons.js';
 import {
+  emptyBackpack,
+  cloneBackpack,
+  BACKPACK_SIZE,
+  addToBackpack,
+  removeFromBackpack,
+  cloneItem,
+} from './inventory-core.js';
+import {
   getMapTheme,
   drawMapDecor,
   drawThematicWalls,
@@ -272,8 +280,9 @@ export class Player extends Entity {
     this.reserve = 24;
     this.fireCooldown = 0;
     this.reloadTime = 0;
-    this.inventory = [];
-    this.maxInv = 6;
+    this.backpack = emptyBackpack();
+    this.equipped = { weapon: null, armor: null };
+    this.maxInv = BACKPACK_SIZE;
     this.selectedSlot = 0;
     this.weaponAmmo = {};
     this.extractProgress = 0;
@@ -288,41 +297,56 @@ export class Player extends Entity {
     this.fireBlockedReason = '';
   }
 
-  initRaidInventory(weaponId, loadout = {}) {
-    const w = getWeapon(weaponId);
-    this.inventory = [{ id: weaponId, name: w.name, weapon: weaponId, starter: true }];
-    this.inventory.push({ id: 'medkit', name: 'Аптечка', heal: 50, consumable: true });
-    for (let i = 0; i < (loadout.extraMedkits || 0); i++) {
-      this.inventory.push({ id: 'medkit', name: 'Аптечка', heal: 50, consumable: true });
-    }
+  initRaidInventory(loadout = {}) {
+    const w = getWeapon('pm');
+    this.backpack = cloneBackpack(loadout.backpack || emptyBackpack());
+    this.equipped = {
+      weapon: { id: 'pm', name: w.name, weapon: 'pm', starter: true, count: 1 },
+      armor: null,
+    };
     this.weaponAmmo = {};
     this.selectedSlot = 0;
-    this.selectSlot(0);
-    if (loadout.extraAmmo) this.reserve += loadout.extraAmmo;
+    this.armor = 0;
+    this.maxArmor = 0;
+    this.equipWeapon('pm');
+
+    for (let i = 0; i < BACKPACK_SIZE; i++) {
+      if (this.backpack[i]?.weapon) {
+        this.equipWeaponFromBackpack(i);
+        break;
+      }
+    }
+    for (let i = 0; i < BACKPACK_SIZE; i++) {
+      if (this.backpack[i]?.armor) {
+        this.equipArmorFromBackpack(i);
+        break;
+      }
+    }
+  }
+
+  get inventory() {
+    return this.backpack;
   }
 
   getSelectedItem() {
-    return this.inventory[this.selectedSlot] || null;
+    return this.backpack[this.selectedSlot] || null;
   }
 
   canShoot() {
-    return !!this.getSelectedItem()?.weapon;
+    return !!this.equipped.weapon?.weapon;
   }
 
   getSlotActionHint() {
     const item = this.getSelectedItem();
     const n = this.selectedSlot + 1;
-    if (!item) return `Слот ${n} пуст`;
-    if (item.weapon) {
-      const w = getWeapon(item.weapon);
-      return w.standToFire
-        ? `Слот ${n}: ${item.name} · стой · ЛКМ`
-        : `Слот ${n}: ${item.name} · ЛКМ`;
-    }
-    if (item.heal) return `Слот ${n}: ${item.name} · F лечиться`;
-    if (item.grenade) return `Слот ${n}: ${item.name} · G бросить`;
-    if (item.smoke) return `Слот ${n}: ${item.name} · V дым`;
-    if (item.armor) return `Слот ${n}: ${item.name} · F надеть`;
+    const wName = this.equipped.weapon?.name || '—';
+    if (!item) return `Слот ${n} пуст · ${wName} · ЛКМ`;
+    if (item.heal) return `Слот ${n}: ${item.name} · F лечиться · ${wName} · ЛКМ`;
+    if (item.grenade) return `Слот ${n}: ${item.name} · G · ${wName} · ЛКМ`;
+    if (item.smoke) return `Слот ${n}: ${item.name} · V · ${wName} · ЛКМ`;
+    if (item.armor) return `Слот ${n}: ${item.name} · надень в рюкзаке`;
+    if (item.ammo) return `Слот ${n}: ${item.name} · R забирает в запас`;
+    if (item.weapon) return `Слот ${n}: ${item.name} · надень в рюкзаке`;
     if (item.value) return `Слот ${n}: ${item.name} · ${item.value}₽ · экстракт`;
     return `Слот ${n}: ${item.name}`;
   }
@@ -335,16 +359,119 @@ export class Player extends Entity {
   selectSlot(idx) {
     if (idx < 0 || idx >= this.maxInv) return;
     this.selectedSlot = idx;
-    const item = this.getSelectedItem();
-    if (item?.weapon) {
-      this.saveWeaponAmmo();
-      this.equipWeapon(item.weapon);
-      const cached = this.weaponAmmo[item.weapon];
-      if (cached) {
-        this.ammo = cached.ammo;
-        this.reserve = cached.reserve;
+  }
+
+  backpackFilledCount() {
+    return this.backpack.filter(Boolean).length;
+  }
+
+  getCarriedLoot() {
+    const loot = this.backpack.filter(Boolean).map((i) => cloneItem(i));
+    if (this.equipped.weapon && !this.equipped.weapon.starter) {
+      loot.push(cloneItem(this.equipped.weapon));
+    }
+    if (this.equipped.armor) loot.push(cloneItem(this.equipped.armor));
+    return loot;
+  }
+
+  getLootValue() {
+    return this.getCarriedLoot().reduce((s, i) => s + (i.value || 0) * (i.count || 1), 0);
+  }
+
+  feedReserveFromBackpack() {
+    for (let i = 0; i < BACKPACK_SIZE; i++) {
+      const item = this.backpack[i];
+      if (!item?.ammo) continue;
+      while (item.count > 0) {
+        this.reserve += item.ammo;
+        const r = removeFromBackpack(this.backpack, i, 1);
+        if (!r.ok) break;
+        if (!this.backpack[i]?.ammo) break;
       }
     }
+  }
+
+  pullAmmoFromBackpack(needed) {
+    let got = 0;
+    for (let i = 0; i < BACKPACK_SIZE && got < needed; i++) {
+      const item = this.backpack[i];
+      if (!item?.ammo) continue;
+      const r = removeFromBackpack(this.backpack, i, 1);
+      if (!r.ok || !r.item) continue;
+      got += r.item.ammo || 0;
+    }
+    return got;
+  }
+
+  equipWeaponFromBackpack(slotIdx) {
+    const item = this.backpack[slotIdx];
+    if (!item?.weapon) return { ok: false, msg: 'Не оружие' };
+    this.saveWeaponAmmo();
+    const old = this.equipped.weapon;
+    const removed = removeFromBackpack(this.backpack, slotIdx, 1);
+    if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось взять' };
+    if (old) {
+      const added = addToBackpack(this.backpack, old, 1);
+      if (!added.ok) {
+        this.backpack[slotIdx] = removed.item;
+        return { ok: false, msg: 'Рюкзак полон — освободи место' };
+      }
+    }
+    this.equipped.weapon = removed.item;
+    this.equipWeapon(removed.item.weapon);
+    const cached = this.weaponAmmo[removed.item.weapon];
+    if (cached) {
+      this.ammo = cached.ammo;
+      this.reserve = cached.reserve;
+    }
+    return { ok: true, msg: `Оружие: ${removed.item.name}` };
+  }
+
+  unequipWeaponToBackpack(slotIdx) {
+    const weapon = this.equipped.weapon;
+    if (!weapon) return { ok: false, msg: 'Нет оружия' };
+    if (this.backpack[slotIdx]) return { ok: false, msg: 'Слот занят' };
+    this.saveWeaponAmmo();
+    this.backpack[slotIdx] = cloneItem(weapon);
+    const w = getWeapon('pm');
+    this.equipped.weapon = { id: 'pm', name: w.name, weapon: 'pm', starter: true, count: 1 };
+    this.equipWeapon('pm');
+    const cached = this.weaponAmmo.pm;
+    if (cached) {
+      this.ammo = cached.ammo;
+      this.reserve = cached.reserve;
+    }
+    return { ok: true, msg: 'Оружие в рюкзак' };
+  }
+
+  equipArmorFromBackpack(slotIdx) {
+    const item = this.backpack[slotIdx];
+    if (!item?.armor) return { ok: false, msg: 'Не броня' };
+    const removed = removeFromBackpack(this.backpack, slotIdx, 1);
+    if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось надеть' };
+    if (this.equipped.armor) {
+      const added = addToBackpack(this.backpack, this.equipped.armor, 1);
+      if (!added.ok) {
+        this.backpack[slotIdx] = removed.item;
+        return { ok: false, msg: 'Рюкзак полон' };
+      }
+      this.armor = Math.max(0, this.armor - (this.equipped.armor.armor || 0));
+    }
+    this.equipped.armor = removed.item;
+    this.armor += removed.item.armor || 0;
+    this.maxArmor = Math.max(this.maxArmor, this.armor);
+    return { ok: true, msg: `Броня +${removed.item.armor}` };
+  }
+
+  unequipArmorToBackpack(slotIdx) {
+    const armor = this.equipped.armor;
+    if (!armor) return { ok: false, msg: 'Нет брони' };
+    if (this.backpack[slotIdx]) return { ok: false, msg: 'Слот занят' };
+    this.backpack[slotIdx] = cloneItem(armor);
+    this.armor = Math.max(0, this.armor - (armor.armor || 0));
+    this.maxArmor = this.armor;
+    this.equipped.armor = null;
+    return { ok: true, msg: 'Броня в рюкзак' };
   }
 
   useSelectedHeal() {
@@ -353,25 +480,12 @@ export class Player extends Entity {
     if (this.hp >= this.maxHp) return { ok: false, msg: 'HP полное' };
     const amount = item.heal;
     this.hp = Math.min(this.maxHp, this.hp + amount);
-    this.inventory.splice(this.selectedSlot, 1);
-    if (this.selectedSlot >= this.inventory.length) {
-      this.selectedSlot = Math.max(0, this.inventory.length - 1);
-    }
-    this.selectSlot(this.selectedSlot);
+    removeFromBackpack(this.backpack, this.selectedSlot, 1);
     return { ok: true, msg: `+${amount} HP`, amount };
   }
 
   useSelectedArmor() {
-    const item = this.getSelectedItem();
-    if (!item?.armor) return { ok: false, msg: 'Выбери слот с бронёй' };
-    this.armor += item.armor;
-    this.maxArmor = Math.max(this.maxArmor, this.armor);
-    this.inventory.splice(this.selectedSlot, 1);
-    if (this.selectedSlot >= this.inventory.length) {
-      this.selectedSlot = Math.max(0, this.inventory.length - 1);
-    }
-    this.selectSlot(this.selectedSlot);
-    return { ok: true, msg: `Броня +${item.armor}` };
+    return this.equipArmorFromBackpack(this.selectedSlot);
   }
 
   useSelectedSlot() {
@@ -379,7 +493,8 @@ export class Player extends Entity {
     if (!item) return { ok: false, msg: 'Пустой слот' };
     if (item.heal) return this.useSelectedHeal();
     if (item.armor) return this.useSelectedArmor();
-    if (item.weapon) return { ok: false, msg: 'Оружие — ЛКМ стрелять' };
+    if (item.weapon) return { ok: false, msg: 'Tab — надень оружие на персонажа' };
+    if (item.ammo) return { ok: false, msg: 'R — забрать патроны в запас' };
     if (item.grenade) return { ok: false, msg: 'Граната — G' };
     if (item.smoke) return { ok: false, msg: 'Дымовая — V' };
     return { ok: false, msg: 'Лут — вези на экстракт' };
@@ -388,22 +503,14 @@ export class Player extends Entity {
   useSelectedGrenade() {
     const item = this.getSelectedItem();
     if (!item?.grenade) return { ok: false, msg: 'Выбери слот с гранатой' };
-    this.inventory.splice(this.selectedSlot, 1);
-    if (this.selectedSlot >= this.inventory.length) {
-      this.selectedSlot = Math.max(0, this.inventory.length - 1);
-    }
-    this.selectSlot(this.selectedSlot);
+    removeFromBackpack(this.backpack, this.selectedSlot, 1);
     return { ok: true, msg: 'Граната!' };
   }
 
   useSelectedSmoke() {
     const item = this.getSelectedItem();
     if (!item?.smoke) return { ok: false, msg: 'Выбери слот с дымовой' };
-    this.inventory.splice(this.selectedSlot, 1);
-    if (this.selectedSlot >= this.inventory.length) {
-      this.selectedSlot = Math.max(0, this.inventory.length - 1);
-    }
-    this.selectSlot(this.selectedSlot);
+    removeFromBackpack(this.backpack, this.selectedSlot, 1);
     return { ok: true, msg: 'Дымовая завеса' };
   }
 
@@ -471,19 +578,29 @@ export class Player extends Entity {
 
     if (this.reloadTime > 0) {
       this.reloadTime -= dt;
-      if (this.reloadTime <= 0 && this.reserve > 0) {
-        const need = this.magSize - this.ammo;
-        const load = Math.min(need, this.reserve);
-        this.ammo += load;
-        this.reserve -= load;
+      if (this.reloadTime <= 0) {
+        if (this.reserve <= 0) this.reserve += this.pullAmmoFromBackpack(this.magSize);
+        if (this.reserve > 0) {
+          const need = this.magSize - this.ammo;
+          const load = Math.min(need, this.reserve);
+          this.ammo += load;
+          this.reserve -= load;
+        }
       }
       return null;
     }
 
     this.fireCooldown -= dt;
-    if (input.tapped('KeyR') && this.canShoot() && this.ammo < this.magSize && this.reserve > 0) {
-      this.reloadTime = this.weaponDef?.reloadTime || 1.4;
-      return null;
+    if (input.tapped('KeyR') && this.canShoot()) {
+      if (this.ammo < this.magSize) {
+        if (this.reserve <= 0) {
+          const pulled = this.pullAmmoFromBackpack(this.magSize - this.ammo);
+          this.reserve += pulled;
+        }
+        if (this.reserve > 0 && this.reloadTime <= 0) {
+          this.reloadTime = this.weaponDef?.reloadTime || 1.4;
+        }
+      }
     }
 
     const w = this.weaponDef || getWeapon(this.weaponId);
@@ -540,34 +657,24 @@ export class Player extends Entity {
   }
 
   dropSelected() {
-    const item = this.inventory[this.selectedSlot];
+    const item = this.getSelectedItem();
     if (!item) return { ok: false, msg: 'Слот пуст' };
-    if (item.starter) return { ok: false, msg: 'Нельзя выбросить основное оружие' };
-    this.inventory.splice(this.selectedSlot, 1);
-    if (this.selectedSlot >= this.inventory.length) {
-      this.selectedSlot = Math.max(0, this.inventory.length - 1);
-    }
-    this.selectSlot(this.selectedSlot);
-    return { ok: true, item, msg: `Выброшено: ${item.name}` };
+    const removed = removeFromBackpack(this.backpack, this.selectedSlot, 1);
+    if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось выбросить' };
+    return { ok: true, item: removed.item, msg: `Выброшено: ${removed.item.name}` };
   }
 
   addLoot(item) {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
-    if (item.ammo) {
-      this.reserve += item.ammo;
-      return { ok: true, msg: `+${item.ammo} патронов в запас` };
-    }
-    if (this.inventory.length >= this.maxInv) {
-      return { ok: false, msg: 'Рюкзак полон! Выброси слот (Q) или разверни рюкзак' };
-    }
-    this.inventory.push(item);
+    const added = addToBackpack(this.backpack, item, item.count || 1);
+    if (!added.ok) return { ok: false, msg: 'Рюкзак полон! Выброси (Q) или разверни рюкзак' };
     const price = item.value ? ` · ${item.value}₽` : '';
-    let hint = 'выбери слот';
-    if (item.weapon) hint = '1–6 → ЛКМ';
-    else if (item.heal) hint = '1–6 → F';
-    else if (item.grenade) hint = '1–6 → G';
-    else if (item.smoke) hint = '1–6 → V';
-    else if (item.armor) hint = '1–6 → F';
+    let hint = 'Tab — рюкзак';
+    if (item.weapon || item.armor) hint = 'Tab — надень на персонажа';
+    else if (item.heal) hint = 'F';
+    else if (item.grenade) hint = 'G';
+    else if (item.smoke) hint = 'V';
+    else if (item.ammo) hint = 'R — в запас';
     return { ok: true, msg: `В рюкзак: ${item.name}${price} (${hint})` };
   }
 

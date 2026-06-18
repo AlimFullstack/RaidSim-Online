@@ -35,7 +35,7 @@
           <div class="brand-mini">RaidSim</div>
           <div class="raid-timer">
             <span class="label">⏱ РЕЙД</span>
-            <span id="timer">08:00</span>
+            <span id="timer">05:00</span>
           </div>
           <div id="status-msg"></div>
         </div>
@@ -68,7 +68,7 @@
 
           <div class="panel inventory hotbar-panel">
             <div class="hotbar-head">
-              <div class="inv-title">🎒 ПАНЕЛЬ <span id="inv-count">0/6</span></div>
+              <div class="inv-title">🎒 ПАНЕЛЬ <span id="inv-count">0/4</span></div>
               <button id="btn-inv-expand" type="button" class="btn-inv-expand">РЮКЗАК ▾</button>
             </div>
             <div id="active-slot-hint" class="active-slot-hint">Слот 1: ПМ · ЛКМ</div>
@@ -77,21 +77,24 @@
         </div>
 
         <div class="controls-hint">
-          WASD · Мышь · 1–6 слот · ЛКМ/F/G/V по слоту · E лут · Q выброс · Esc настройки
+          WASD · Мышь · 1–4 слот · ЛКМ стрельба · F/G/V · E лут · Q выброс · Tab рюкзак
         </div>
 
         <div id="inv-overlay" class="inv-overlay inv-overlay-full hidden">
-          <div class="inv-panel tac-panel">
+          <div class="inv-panel tac-panel inv-panel-wide">
             <div class="inv-panel-head">
               <h3>🎒 РЮКЗАК</h3>
-              <span id="inv-overlay-count" class="inv-overlay-count">0/6</span>
+              <span id="inv-overlay-count" class="inv-overlay-count">0/4</span>
               <button id="inv-overlay-close" type="button" class="inv-close" aria-label="Закрыть">✕</button>
             </div>
             <p id="inv-overlay-hint" class="inv-hint">
-              Клик по слоту — выбрать. Оружие → ЛКМ · Аптечка → F · Граната → G · Дым → V · Лут → экстракт
+              Перетащи оружие/броню на персонажа · 1–4 выбор слота · F/G/V · R патроны · Q выброс
             </p>
-            <div id="inv-overlay-list" class="inv-overlay-list"></div>
-            <p class="inv-footer">Кнопка «РЮКЗАК» или Tab — закрыть · Q — выбросить выбранный</p>
+            <div class="inv-overlay-body">
+              <div id="inv-overlay-equip" class="inv-overlay-equip"></div>
+              <div id="inv-overlay-grid" class="inv-overlay-grid"></div>
+            </div>
+            <p class="inv-footer">Tab / I — закрыть · Q — выбросить из выбранного слота</p>
           </div>
         </div>
       </div>

@@ -224,9 +224,68 @@ body:has(.lobby-screen:not(.hidden)) #app {
 }
 
 .loadout-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.loadout-slots-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+}
+
+.operator-pack-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ok);
+  display: flex;
+  justify-content: space-between;
+}
+
+.operator-pack-hint,
+.operator-starter-note {
+  margin: 0;
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.loadout-slot,
+.stash-cell.inv-slot {
+  min-height: 64px;
+  padding: 8px;
+  border: 1px dashed #2a3228;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.loadout-slot.filled,
+.stash-cell.inv-slot.filled {
+  border-style: solid;
+  border-color: var(--border-accent);
+}
+
+.loadout-slot.drop-target,
+.stash-cell.drop-target {
+  border-color: #5dade2;
+  background: rgba(93, 173, 226, 0.12);
+}
+
+.loadout-slot.dragging,
+.stash-cell.dragging {
+  opacity: 0.5;
+}
+
+.loadout-slot .slot-num {
+  font-size: 9px;
+  color: var(--muted);
 }
 
 .equip-slot {
