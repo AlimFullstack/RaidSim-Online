@@ -1,6 +1,18 @@
 export const METER = 200;
-export const MAP_W = METER * 4;
-export const MAP_H = METER * 4;
+export const WORLD_SCALE = 10;
+export const GRID_UNITS = 4 * WORLD_SCALE;
+export const MAP_W = METER * GRID_UNITS;
+export const MAP_H = METER * GRID_UNITS;
+
+let _mapBounds = { w: MAP_W, h: MAP_H };
+
+export function setMapBounds(w, h) {
+  _mapBounds = { w, h };
+}
+
+export function getMapBounds() {
+  return _mapBounds;
+}
 
 export const EXTRACT_TIME = 5;
 

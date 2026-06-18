@@ -45,7 +45,7 @@ export class Lobby {
       shopList: document.getElementById('shop-list'),
       hideoutStats: document.getElementById('hideout-stats'),
       slotsLeft: document.getElementById('loadout-slots'),
-      slotsRight: document.getElementById('loadout-slots-right'),
+      slotsRight: null,
       charCanvas: document.getElementById('lobby-char'),
       deployBtn: document.getElementById('btn-play'),
     };
@@ -114,9 +114,53 @@ export class Lobby {
       pane.classList.toggle('hidden', id !== tabId);
       pane.classList.toggle('active', id === tabId);
     });
-    if (tabId === 'stash') this.renderStash();
-    if (tabId === 'hideout') this.renderHideout();
-    if (tabId === 'shop') this.renderShop();
+    this.renderTabPanels();
+  }
+
+  /** После любого изменения профиля — обновить все зависимые панели */
+  onProfileChanged(toastMsg = null) {
+    if (toastMsg) this.flash(toastMsg);
+    this.render();
+  }
+
+  renderTabPanels() {
+    this.renderStash();
+    this.renderHideout();
+    this.renderShop();
+  }
+
+  renderHeader() {
+    if (!this.profile) return;
+    const p = this.profile;
+    const level = xpToLevel(p.xp);
+    const nextXp = xpForNextLevel(level);
+    const prevXp = xpForNextLevel(level - 1);
+    const pct = ((p.xp - prevXp) / (nextXp - prevXp)) * 100;
+    const survival = getSurvivalRate(p);
+
+    if (this.el.avatar) {
+      if (p.photoURL) {
+        this.el.avatar.innerHTML = `<img src="${p.photoURL}" alt="" />`;
+      } else {
+        this.el.avatar.textContent = p.isGuest ? '?' : p.displayName.charAt(0).toUpperCase();
+      }
+    }
+    if (this.el.name) this.el.name.textContent = p.displayName;
+    if (this.el.level) this.el.level.textContent = `Ур. ${level}`;
+    if (this.el.xpBar) this.el.xpBar.style.width = `${Math.min(100, pct)}%`;
+    if (this.el.rubles) this.el.rubles.textContent = `${p.rubles} ₽`;
+    if (this.el.guestBadge) this.el.guestBadge.classList.toggle('hidden', !p.isGuest);
+    if (this.el.statsMini) {
+      this.el.statsMini.textContent = `Рейдов: ${p.stats.raids} · Выжил: ${survival}% · Убийств: ${p.stats.kills}`;
+    }
+  }
+
+  renderRaidTab() {
+    this.renderQuestCard();
+    this.renderBriefing();
+    this.updateDeployBtn();
+    this.renderMaps();
+    this.renderModes();
   }
 
   formatDuration(sec) {
@@ -185,18 +229,20 @@ export class Lobby {
   }
 
   renderShop() {
-    if (!this.el.shopList) return;
-    this.el.shopList.innerHTML = SHOP_ITEMS.map(
-      (item) => `
-      <button type="button" class="shop-card" data-shop="${item.id}">
+    if (!this.el.shopList || !this.profile) return;
+    const rubles = this.profile.rubles;
+    this.el.shopList.innerHTML = SHOP_ITEMS.map((item) => {
+      const afford = rubles >= item.cost;
+      return `
+      <button type="button" class="shop-card${afford ? '' : ' shop-card--disabled'}" data-shop="${item.id}" ${afford ? '' : 'disabled'}>
         <span class="shop-card-icon">${SHOP_ICONS[item.id] || '📦'}</span>
         <span class="shop-card-name">${item.name}</span>
         <span class="shop-card-desc">${this.shopEffectDesc(item)}</span>
         <span class="shop-card-cost">${item.cost} ₽</span>
-      </button>`
-    ).join('');
+      </button>`;
+    }).join('');
 
-    this.el.shopList.querySelectorAll('.shop-card').forEach((btn) => {
+    this.el.shopList.querySelectorAll('.shop-card:not([disabled])').forEach((btn) => {
       btn.addEventListener('click', async () => {
         this.uiClick();
         const r = buyShopItem(this.profile, btn.dataset.shop);
@@ -205,8 +251,8 @@ export class Lobby {
           return;
         }
         this.profile = r.profile;
-        await this.persistProfile(r.msg);
-        this.render();
+        await this.persistProfile(null);
+        this.onProfileChanged(r.msg);
       });
     });
   }
@@ -268,15 +314,15 @@ export class Lobby {
     if (!this.profile) return;
     const questId = this.profile.quests?.active?.id;
     this.profile = applyRaidResult(this.profile, { ...result, mode: this.selectedMode });
-    if (questId && !this.profile.quests?.active) {
-      this.audio?.play('questDone');
-      this.flash('Квест выполнен!');
-    }
+    const questDone = questId && !this.profile.quests?.active;
+    if (questDone) this.audio?.play('questDone');
     if (!this.auth.isGuest()) {
-      await this.persistProfile('Прогресс сохранён в облаке');
+      await this.persistProfile(null);
+      this.flash('Прогресс сохранён в облаке');
     } else {
       this.flash('Гость: прогресс не сохранится при обновлении страницы');
     }
+    if (questDone) setTimeout(() => this.flash('Квест выполнен!'), 2600);
     this.showLobby();
   }
 
@@ -296,11 +342,11 @@ export class Lobby {
 
   renderStash() {
     if (!this.el.stashGrid) return;
+    const { count, totalValue } = this.getStashInfo();
     const items = this.profile?.stash?.items || [];
-    const totalValue = items.reduce((s, i) => s + (i.value || 0), 0);
 
     if (this.el.stashSummary) {
-      this.el.stashSummary.textContent = `${items.length}/24 · ${totalValue} ₽`;
+      this.el.stashSummary.textContent = `${count}/24 · ${totalValue} ₽`;
     }
 
     if (!items.length) {
@@ -323,24 +369,36 @@ export class Lobby {
       btn.addEventListener('click', async () => {
         this.uiClick();
         const r = sellStashItem(this.profile, Number(btn.dataset.idx));
-        if (!r.ok) return;
+        if (!r.ok) {
+          this.flash(r.msg || 'Не удалось продать');
+          return;
+        }
         this.profile = r.profile;
         await this.persistProfile(null);
-        this.renderStash();
-        this.render();
+        this.onProfileChanged(r.msg);
       });
     });
+  }
+
+  getStashInfo() {
+    const items = this.profile?.stash?.items || [];
+    const totalValue = items.reduce((s, i) => s + (i.value || 0), 0);
+    return { count: items.length, totalValue };
   }
 
   renderHideout() {
     const el = this.el.hideoutStats;
     if (!el || !this.profile) return;
     const s = this.profile.stats;
-    const stashCount = this.profile.stash?.items?.length || 0;
+    const { count: stashCount, totalValue: stashValue } = this.getStashInfo();
     const survival = getSurvivalRate(this.profile);
 
     el.innerHTML = `
       <div class="hideout-stat-grid">
+        <div class="hideout-stat">
+          <span class="hideout-stat-value">${this.profile.rubles}₽</span>
+          <span class="hideout-stat-label">РУБЛИ</span>
+        </div>
         <div class="hideout-stat">
           <span class="hideout-stat-value">${s.raids}</span>
           <span class="hideout-stat-label">РЕЙДОВ</span>
@@ -366,6 +424,10 @@ export class Lobby {
           <span class="hideout-stat-label">СХРОН</span>
         </div>
         <div class="hideout-stat">
+          <span class="hideout-stat-value">${stashValue}₽</span>
+          <span class="hideout-stat-label">ЦЕННОСТЬ СХРОНА</span>
+        </div>
+        <div class="hideout-stat">
           <span class="hideout-stat-value">${this.profile.hideout?.level || 1}</span>
           <span class="hideout-stat-label">УБЕЖИЩЕ</span>
         </div>
@@ -375,32 +437,29 @@ export class Lobby {
   }
 
   renderOperatorSlots() {
+    const el = this.el.slotsLeft;
+    if (!el) return;
     const ld = this.profile?.loadout || {};
     const weapon = getWeapon(ld.weapon || 'pm');
-    const stashCount = this.profile?.stash?.items?.length || 0;
+    const { count: stashCount } = this.getStashInfo();
 
     const slot = (icon, label, value, filled) => `
       <div class="equip-slot ${filled ? 'filled' : ''}" title="${label}: ${value}">
-        <span class="slot-icon">${icon}</span>
-        <span class="slot-label">${label}</span>
+        <div class="slot-row">
+          <span class="slot-icon">${icon}</span>
+          <span class="slot-label">${label}</span>
+        </div>
         <span class="slot-value">${value}</span>
       </div>`;
 
-    if (this.el.slotsLeft) {
-      this.el.slotsLeft.innerHTML = [
-        slot('🔫', 'ОРУЖИЕ', weapon.name, true),
-        slot('🛡', 'БРОНЯ', ld.startArmor ? `${ld.startArmor} HP` : '—', !!ld.startArmor),
-        slot('💊', 'АПТЕЧКИ', ld.extraMedkits ? `+${ld.extraMedkits}` : '—', !!ld.extraMedkits),
-      ].join('');
-    }
-
-    if (this.el.slotsRight) {
-      this.el.slotsRight.innerHTML = [
-        slot('🔋', 'ПАТРОНЫ', ld.extraAmmo ? `+${ld.extraAmmo}` : '—', !!ld.extraAmmo),
-        slot('🎒', 'РЮКЗАК', '6 слотов', true),
-        slot('📦', 'СХРОН', `${stashCount}/24`, stashCount > 0),
-      ].join('');
-    }
+    el.innerHTML = [
+      slot('🔫', 'ОРУЖИЕ', weapon.name, true),
+      slot('🛡', 'БРОНЯ', ld.startArmor ? `${ld.startArmor} HP` : '—', !!ld.startArmor),
+      slot('💊', 'АПТЕЧКИ', ld.extraMedkits ? `+${ld.extraMedkits}` : '—', !!ld.extraMedkits),
+      slot('🔋', 'ПАТРОНЫ', ld.extraAmmo ? `+${ld.extraAmmo}` : '—', !!ld.extraAmmo),
+      slot('🎒', 'РЮКЗАК', '6 слотов', true),
+      slot('📦', 'СХРОН', `${stashCount}/24`, stashCount > 0),
+    ].join('');
   }
 
   renderQuestCard() {
@@ -479,39 +538,10 @@ export class Lobby {
 
   render() {
     if (!this.profile) return;
-    const p = this.profile;
-    const level = xpToLevel(p.xp);
-    const nextXp = xpForNextLevel(level);
-    const prevXp = xpForNextLevel(level - 1);
-    const pct = ((p.xp - prevXp) / (nextXp - prevXp)) * 100;
-    const survival = getSurvivalRate(p);
-
-    if (this.el.avatar) {
-      if (p.photoURL) {
-        this.el.avatar.innerHTML = `<img src="${p.photoURL}" alt="" />`;
-      } else {
-        this.el.avatar.textContent = p.isGuest ? '?' : p.displayName.charAt(0).toUpperCase();
-      }
-    }
-    if (this.el.name) this.el.name.textContent = p.displayName;
-    if (this.el.level) this.el.level.textContent = `Ур. ${level}`;
-    if (this.el.xpBar) this.el.xpBar.style.width = `${Math.min(100, pct)}%`;
-    if (this.el.rubles) this.el.rubles.textContent = `${p.rubles} ₽`;
-    if (this.el.guestBadge) this.el.guestBadge.classList.toggle('hidden', !p.isGuest);
-    if (this.el.statsMini) {
-      this.el.statsMini.textContent = `Рейдов: ${p.stats.raids} · Выжил: ${survival}% · Убийств: ${p.stats.kills}`;
-    }
-
-    this.renderQuestCard();
+    this.renderHeader();
+    this.renderRaidTab();
     this.renderOperatorSlots();
-    this.renderBriefing();
-    this.updateDeployBtn();
-    this.renderMaps();
-    this.renderModes();
-
-    if (this.activeTab === 'stash') this.renderStash();
-    if (this.activeTab === 'hideout') this.renderHideout();
-
+    this.renderTabPanels();
     this.drawCharacter();
   }
 

@@ -50,18 +50,26 @@ describe('clamp', () => {
 });
 
 describe('parseMapConfig', () => {
-  it('scales meter coordinates', () => {
+  it('scales meter coordinates with world expansion', () => {
     const map = parseMapConfig({
       id: 'test',
       name: 'Test',
       theme: 'default',
-      walls: [{ x: 1, y: 1, w: 0.5, h: 0.5 }],
+      walls: [
+        { x: 0, y: 0, w: 4, h: 0.12, m: 1 },
+        { x: 0, y: 3.88, w: 4, h: 0.12, m: 1 },
+        { x: 0, y: 0, w: 0.12, h: 4, m: 1 },
+        { x: 3.88, y: 0, w: 0.12, h: 4, m: 1 },
+        { x: 1, y: 1, w: 0.5, h: 0.5 },
+      ],
       extractZone: { x: 1, y: 1, w: 1, h: 1 },
       spawnPlayer: { x: 0.5, y: 0.5 },
       lootPoints: [{ x: 2, y: 2, tier: 'normal' }],
       scavSpawns: [{ x: 1, y: 1 }],
     });
-    expect(map.walls[0].x).toBe(200);
-    expect(map.spawnPlayer.x).toBe(100);
+    expect(map.mapW).toBe(8000);
+    expect(map.mapH).toBe(8000);
+    expect(map.spawnPlayer.x).toBe(1000);
+    expect(map.walls.some((w) => w.x === 2000)).toBe(true);
   });
 });

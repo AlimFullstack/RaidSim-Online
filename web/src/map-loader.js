@@ -1,35 +1,44 @@
-import { METER, MAP_W, MAP_H } from './map-core.js';
+import { METER } from './map-core.js';
+import { expandRawMap } from './map-expand.js';
 
 /** @param {import('./types.d.ts').MapConfig} raw */
 export function parseMapConfig(raw) {
-  const scale = (v, m = false) => (m ? v * METER : v * METER);
+  const expanded = expandRawMap(raw);
+  const gridW = expanded.gridW;
+  const gridH = expanded.gridH;
+  const mapW = gridW * METER;
+  const mapH = gridH * METER;
 
-  const walls = raw.walls.map((w) => ({
-    x: scale(w.x, w.m),
-    y: scale(w.y, w.m),
-    w: scale(w.w, w.m),
-    h: scale(w.h, w.m),
+  const toPx = (v) => v * METER;
+
+  const walls = expanded.walls.map((w) => ({
+    x: toPx(w.x),
+    y: toPx(w.y),
+    w: toPx(w.w),
+    h: toPx(w.h),
   }));
 
-  const pt = (p) => ({ x: p.x * METER, y: p.y * METER });
+  const pt = (p) => ({ x: toPx(p.x), y: toPx(p.y) });
 
   return {
-    id: raw.id,
-    name: raw.name,
-    theme: raw.theme || 'default',
+    id: expanded.id,
+    name: expanded.name,
+    theme: expanded.theme || 'default',
     walls,
     extractZone: {
-      x: raw.extractZone.x * METER,
-      y: raw.extractZone.y * METER,
-      w: raw.extractZone.w * METER,
-      h: raw.extractZone.h * METER,
+      x: toPx(expanded.extractZone.x),
+      y: toPx(expanded.extractZone.y),
+      w: toPx(expanded.extractZone.w),
+      h: toPx(expanded.extractZone.h),
     },
-    spawnPlayer: pt(raw.spawnPlayer),
-    lootPoints: raw.lootPoints.map((p) => ({ ...pt(p), tier: p.tier || 'normal' })),
-    scavSpawns: raw.scavSpawns.map(pt),
-    bossSpawn: raw.bossSpawn ? pt(raw.bossSpawn) : null,
-    mapW: MAP_W,
-    mapH: MAP_H,
+    spawnPlayer: pt(expanded.spawnPlayer),
+    lootPoints: expanded.lootPoints.map((p) => ({ ...pt(p), tier: p.tier || 'normal' })),
+    scavSpawns: expanded.scavSpawns.map(pt),
+    bossSpawn: expanded.bossSpawn ? pt(expanded.bossSpawn) : null,
+    mapW,
+    mapH,
+    gridW,
+    gridH,
   };
 }
 
@@ -51,20 +60,20 @@ export function getMapList() {
   return [
     {
       id: 'factory',
-      name: 'Завод 4×4',
+      name: 'Завод 40×40',
       theme: 'default',
-      desc: 'Открытая площадка с укрытиями и лут-точками',
+      desc: 'Большая промзона с укрытиями и лут-точками',
       threat: 'Средняя',
-      scavCount: 5,
+      scavCount: 18,
       timeLabel: 'День',
     },
     {
       id: 'night',
-      name: 'Ночной двор',
+      name: 'Ночной сектор',
       theme: 'night',
       desc: 'Темнота снижает обзор, больше Scav',
       threat: 'Высокая',
-      scavCount: 6,
+      scavCount: 20,
       timeLabel: 'Ночь',
     },
   ];

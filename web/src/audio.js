@@ -6,6 +6,7 @@ export class AudioManager {
     this.master = 0.32;
     this.musicVol = 0.14;
     this.muted = localStorage.getItem(STORAGE_KEY) === '1';
+    this.sfxVol = 1;
     this.musicGain = null;
     this.sfxGain = null;
     this.currentTrack = null;
@@ -45,8 +46,16 @@ export class AudioManager {
   _applyVolumes() {
     if (!this.musicGain) return;
     const m = this.muted ? 0 : 1;
+    const sfxMul = this.sfxVol ?? 1;
     this.musicGain.gain.value = this.master * this.musicVol * m;
-    this.sfxGain.gain.value = this.master * m;
+    this.sfxGain.gain.value = this.master * sfxMul * m;
+  }
+
+  applySettings(settings) {
+    this.master = settings.masterVol ?? this.master;
+    this.musicVol = settings.musicVol ?? this.musicVol;
+    this.sfxVol = settings.sfxVol ?? 1;
+    this._applyVolumes();
   }
 
   toggleMute() {

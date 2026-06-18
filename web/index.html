@@ -19,6 +19,7 @@
     <canvas id="festive-bg" aria-hidden="true"></canvas>
 
     <button id="btn-mute" class="btn-mute" type="button" aria-label="Выключить звук">🔊</button>
+    <button id="btn-settings" class="btn-settings" type="button" aria-label="Настройки">⚙</button>
 
     <div id="app">
       <div class="game-frame">
@@ -72,7 +73,7 @@
         </div>
 
         <div class="controls-hint">
-          WASD · Shift бег · Мышь · ЛКМ · E лут · F аптечка · G граната · V дым
+          WASD · Shift · Мышь · ЛКМ · E лут · Q выброс · 1–6 слот · F аптечка · G граната · V дым · Esc настройки
         </div>
       </div>
     </div>
@@ -122,18 +123,15 @@
         <div class="lobby-grid">
           <section class="operator-panel tac-panel">
             <h2 class="panel-title">ОПЕРАТОР</h2>
-            <div class="operator-body">
-              <div id="loadout-slots" class="loadout-slots loadout-slots-left"></div>
-              <div class="operator-char-wrap">
-                <canvas id="lobby-char" width="280" height="320"></canvas>
-              </div>
-              <div id="loadout-slots-right" class="loadout-slots loadout-slots-right"></div>
+            <div class="operator-char-wrap">
+              <canvas id="lobby-char" width="180" height="220"></canvas>
             </div>
+            <div id="loadout-slots" class="loadout-grid"></div>
           </section>
 
           <section class="tab-content">
             <div id="tab-raid" class="tab-pane active">
-              <div id="quest-panel" class="quest-card tac-panel"></div>
+              <div id="quest-panel" class="quest-card"></div>
               <div class="raid-section">
                 <p class="section-label">ЛОКАЦИЯ</p>
                 <div id="map-list" class="map-card-grid"></div>
@@ -142,7 +140,7 @@
                 <p class="section-label">РЕЖИМ</p>
                 <div id="mode-list" class="mode-card-grid"></div>
               </div>
-              <div id="raid-briefing" class="raid-briefing tac-panel"></div>
+              <div id="raid-briefing" class="raid-briefing"></div>
               <button id="btn-play" type="button" class="btn primary deploy-btn">В РЕЙД</button>
             </div>
 
@@ -166,7 +164,7 @@
               <div class="tab-pane-head">
                 <h2 class="panel-title">УБЕЖИЩЕ</h2>
               </div>
-              <div id="hideout-stats" class="hideout-panel tac-panel"></div>
+              <div id="hideout-stats" class="hideout-panel"></div>
             </div>
           </section>
         </div>
@@ -195,6 +193,28 @@
         </ul>
         <button id="btn-start" class="btn primary">НАЧАТЬ РЕЙД</button>
         <p class="deploy-note">alimfrontend.github.io/RaidSim-Online</p>
+      </div>
+    </div>
+
+    <div id="settings-modal" class="settings-modal hidden">
+      <div class="settings-card tac-panel">
+        <div class="settings-head">
+          <h2>НАСТРОЙКИ</h2>
+          <button id="settings-close" type="button" class="settings-close">✕</button>
+        </div>
+        <nav class="settings-tabs">
+          <button type="button" class="settings-tab active" data-stab="controls">Управление</button>
+          <button type="button" class="settings-tab" data-stab="audio">Звук</button>
+        </nav>
+        <div id="stab-controls" class="settings-pane active">
+          <div id="controls-list" class="controls-list"></div>
+        </div>
+        <div id="stab-audio" class="settings-pane hidden">
+          <label class="vol-row">Общая громкость <input id="vol-master" type="range" min="0" max="100" value="32" /></label>
+          <label class="vol-row">Эффекты <input id="vol-sfx" type="range" min="0" max="100" value="100" /></label>
+          <label class="vol-row">Музыка <input id="vol-music" type="range" min="0" max="100" value="14" /></label>
+          <label class="vol-row">Чувствительность мыши <input id="mouse-sens" type="range" min="50" max="200" value="100" /></label>
+        </div>
       </div>
     </div>
 

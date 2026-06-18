@@ -1,17 +1,17 @@
 import {
-  MAP_W,
-  MAP_H,
   EXTRACT_TIME,
   pointInRect,
   rollLoot,
   formatTime,
   dist,
+  setMapBounds,
 } from './map-core.js';
 import { loadMap } from './map-loader.js';
-import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, drawMap } from './entities.js';
+import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, GroundItem, drawMap } from './entities.js';
 import { RAID_MODES } from './profile.js';
 import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
+import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
@@ -53,14 +53,20 @@ export class Game {
     this.wasInExtract = false;
     this.scavAlerted = new Set();
     this.playerMoving = false;
+    this.groundItems = [];
+    this.settings = loadSettings();
+    this._hudCache = '';
+    this.settingsOpen = false;
   }
 
   async startRaid(mode = 'standard', loadout = {}, mapId = 'factory') {
     this.audio?.unlock('raid');
+    this.audio?.startMusic('raid');
     this.fx.clear();
     this.raidMode = mode;
     const modeConfig = RAID_MODES[mode] || RAID_MODES.standard;
     this.activeMap = await loadMap(mapId);
+    setMapBounds(this.activeMap.mapW, this.activeMap.mapH);
     this.state = 'raid';
     this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
@@ -85,6 +91,7 @@ export class Game {
       this.scavs.push(boss);
     }
     this.smokeZones = [];
+    this.groundItems = [];
     this.playerCorpse = null;
     this.noiseEvents = [];
     this.scavAlerted = new Set();
@@ -97,7 +104,20 @@ export class Game {
     this.ui.hideEnd();
     document.getElementById('lobby-screen')?.classList.add('hidden');
     document.getElementById('auth-screen')?.classList.add('hidden');
+    this._hudCache = '';
     this.resize();
+  }
+
+  applySettings(settings) {
+    this.settings = settings;
+    this.audio?.applySettings(settings);
+  }
+
+  toggleSettings() {
+    this.settingsOpen = !this.settingsOpen;
+    const el = document.getElementById('settings-modal');
+    if (el) el.classList.toggle('hidden', !this.settingsOpen);
+    if (this.settingsOpen) this.ui.renderSettings?.(this.settings);
   }
 
   setStatus(msg, duration = 2, kind = '') {
@@ -113,6 +133,16 @@ export class Game {
 
   update(dt) {
     if (this.state !== 'raid') return;
+
+    if (this.input.tapped('Escape')) {
+      this.toggleSettings();
+      this.input.endFrame();
+      return;
+    }
+    if (this.settingsOpen) {
+      this.input.endFrame();
+      return;
+    }
 
     this.raidTimeLeft -= dt;
     if (this.raidTimeLeft <= 0) {
@@ -165,6 +195,19 @@ export class Game {
         this.audio?.play('smoke');
         this.fx.smokePuff(p.x, p.y);
         this.setStatus('Дымовая завеса', 1.5, 'combat');
+      }
+      if (this.input.tapped('KeyQ')) {
+        const drop = p.dropSelected();
+        if (drop.ok && drop.item) {
+          const dx = Math.cos(p.angle) * 28;
+          const dy = Math.sin(p.angle) * 28;
+          this.groundItems.push(new GroundItem(p.x + dx, p.y + dy, drop.item));
+          this.audio?.play('loot');
+          this.fx.floatText(p.x, p.y - 20, drop.msg, '#a8b89a');
+          this._hudCache = '';
+        } else if (!drop.ok) {
+          this.setStatus(drop.msg, 1.5, 'fail');
+        }
       }
 
       const reloading = p.reloadTime > 0;
@@ -265,6 +308,13 @@ export class Game {
       }
     }
 
+    for (const gi of this.groundItems) {
+      const d = dist(p.x, p.y, gi.x, gi.y);
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity)) {
+        best = { type: 'ground', target: gi, x: gi.x, y: gi.y, d };
+      }
+    }
+
     return best;
   }
 
@@ -281,6 +331,24 @@ export class Game {
       if (near?.type === 'loot') near.target.progress = 0;
       if (near?.type === 'corpse') near.target.searchProgress = 0;
       if (near?.type === 'pmc') near.target.searchProgress = 0;
+      if (near?.type === 'ground') near.target.pickupProgress = 0;
+      return;
+    }
+
+    if (near.type === 'ground') {
+      near.target.pickupProgress = (near.target.pickupProgress || 0) + dt / 0.6;
+      if (near.target.pickupProgress < 1) return;
+      const result = p.addLoot(near.target.item);
+      if (result.ok) {
+        this.groundItems = this.groundItems.filter((g) => g !== near.target);
+        this.audio?.play('loot');
+        this.fx.lootSparkle(near.x, near.y);
+        this._hudCache = '';
+        this.setStatus(result.msg, 2, 'loot');
+      } else {
+        this.audio?.play('fail');
+        this.setStatus(result.msg, 2, 'fail');
+      }
       return;
     }
 
@@ -437,27 +505,30 @@ export class Game {
   }
 
   updateCamera() {
-    if (!this.player) return;
+    if (!this.player || !this.activeMap) return;
+    const mapW = this.activeMap.mapW;
+    const mapH = this.activeMap.mapH;
     const viewW = this.canvas.width / this.scale;
     const viewH = this.canvas.height / this.scale;
-    this.camX = Math.max(0, Math.min(MAP_W - viewW, this.player.x - viewW / 2));
-    this.camY = Math.max(0, Math.min(MAP_H - viewH, this.player.y - viewH / 2));
-    this.input.updateWorld(this.camX, this.camY, this.scale);
+    this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2));
+    this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2));
+    const sens = this.settings?.mouseSens ?? 1;
+    this.input.updateWorld(this.camX, this.camY, this.scale, sens);
   }
 
   resize() {
-    const maxW = window.innerWidth;
-    const maxH = window.innerHeight - 20;
-    this.scale = Math.min(maxW / MAP_W, maxH / MAP_H, 1.2);
-    this.canvas.width = Math.floor(MAP_W * this.scale);
-    this.canvas.height = Math.floor(MAP_H * this.scale);
+    const maxW = Math.min(window.innerWidth, 1280);
+    const maxH = Math.min(window.innerHeight - 60, 900);
+    this.canvas.width = Math.max(640, Math.floor(maxW));
+    this.canvas.height = Math.max(480, Math.floor(maxH));
+    this.scale = 1;
     if (this.player) this.updateCamera();
   }
 
   drawInteractHint(ctx) {
     const near = this.nearestInteract;
     if (!near || this.state !== 'raid') return;
-    const labels = { corpse: 'E — обыск Scav', loot: 'E — поиск лута', pmc: 'E — обыск тела' };
+    const labels = { corpse: 'E — обыск Scav', loot: 'E — поиск лута', pmc: 'E — обыск тела', ground: 'E — подобрать' };
     const label = labels[near.type];
     ctx.font = '12px JetBrains Mono';
     ctx.textAlign = 'center';
@@ -481,12 +552,13 @@ export class Game {
     for (const lp of this.lootPoints) lp.draw(ctx);
     for (const scav of this.scavs) scav.draw(ctx);
     if (this.playerCorpse) this.playerCorpse.draw(ctx);
+    for (const gi of this.groundItems) gi.draw(ctx);
     if (this.player && !this.player.dead) this.player.draw(ctx);
     for (const b of this.bullets) b.draw(ctx);
     this.fx.drawWorld(ctx);
     this.drawInteractHint(ctx);
 
-    if (this.player?.extracting) {
+    if (this.extracting && this.player) {
       ctx.fillStyle = 'rgba(46, 204, 113, 0.85)';
       ctx.font = '14px JetBrains Mono';
       ctx.textAlign = 'center';
@@ -515,14 +587,34 @@ export function createUI() {
   const endScreen = document.getElementById('end-screen');
   const muteBtn = document.getElementById('btn-mute');
 
+  function invCacheKey(p) {
+    return `${p.inventory.length}|${p.selectedSlot}|${p.inventory.map((i) => i?.uid || i?.id).join(',')}`;
+  }
+
   return {
     showHud() { hud.classList.remove('hidden'); },
     hideHud() { hud.classList.add('hidden'); },
     hideOverlay() { overlay.classList.add('hidden'); },
-    showOverlay() { overlay.classList.remove('hidden'); },
     hideEnd() { endScreen.classList.add('hidden'); },
     updateMuteButton(muted) {
       if (muteBtn) muteBtn.textContent = muted ? '🔇' : '🔊';
+    },
+    renderSettings(settings) {
+      const master = document.getElementById('vol-master');
+      const sfx = document.getElementById('vol-sfx');
+      const music = document.getElementById('vol-music');
+      const sens = document.getElementById('mouse-sens');
+      if (master) master.value = String(Math.round(settings.masterVol * 100));
+      if (sfx) sfx.value = String(Math.round(settings.sfxVol * 100));
+      if (music) music.value = String(Math.round(settings.musicVol * 100));
+      if (sens) sens.value = String(Math.round(settings.mouseSens * 100));
+      const list = document.getElementById('controls-list');
+      if (list && !list.dataset.filled) {
+        list.innerHTML = CONTROL_BINDINGS.map(
+          (b) => `<div class="ctrl-row"><span class="ctrl-keys">${b.keys}</span><span class="ctrl-action">${b.action}</span></div>`
+        ).join('');
+        list.dataset.filled = '1';
+      }
     },
     showEnd(payload) {
       endScreen.classList.remove('hidden');
@@ -564,14 +656,27 @@ export function createUI() {
       const armorText = document.getElementById('armor-text');
       if (armorEl) armorEl.style.width = `${p.maxArmor > 0 ? (p.armor / p.maxArmor) * 100 : 0}%`;
       if (armorText) armorText.textContent = Math.ceil(p.armor);
-      const slots = document.getElementById('inv-slots');
-      slots.innerHTML = '';
-      for (let i = 0; i < p.maxInv; i++) {
-        const item = p.inventory[i];
-        const div = document.createElement('div');
-        div.className = 'slot' + (item ? ' filled' : '');
-        div.textContent = item ? item.name.slice(0, 8) : '—';
-        slots.appendChild(div);
+
+      const key = invCacheKey(p);
+      if (key !== game._hudCache) {
+        game._hudCache = key;
+        const slots = document.getElementById('inv-slots');
+        slots.innerHTML = '';
+        for (let i = 0; i < p.maxInv; i++) {
+          const item = p.inventory[i];
+          const div = document.createElement('div');
+          div.className = 'slot' + (item ? ' filled' : '') + (i === p.selectedSlot ? ' selected' : '');
+          div.dataset.idx = String(i);
+          div.innerHTML = item
+            ? `<span class="slot-num">${i + 1}</span>${item.name.slice(0, 9)}`
+            : `<span class="slot-num">${i + 1}</span>—`;
+          div.title = item ? `${item.name} — Q выбросить` : 'Пустой слот';
+          div.addEventListener('click', () => {
+            p.selectedSlot = i;
+            game._hudCache = '';
+          });
+          slots.appendChild(div);
+        }
       }
     },
   };
