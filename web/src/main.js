@@ -137,6 +137,7 @@ document.getElementById('btn-retry')?.addEventListener('click', async () => {
   festiveBg.setActive(true);
   game.state = 'menu';
   audio.unlock('lobby');
+  audio.startMusic('lobby');
 });
 
 document.getElementById('btn-mute')?.addEventListener('click', async () => {

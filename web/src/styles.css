@@ -583,6 +583,42 @@ body {
   margin-bottom: 8px;
 }
 
+.panel.weapon {
+  position: relative;
+}
+
+.panel.weapon.reloading {
+  border-color: rgba(46, 204, 113, 0.45);
+}
+
+.weapon-reload-wrap {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+}
+
+.weapon-reload-ring {
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+}
+
+.weapon-reload-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 3;
+}
+
+.weapon-reload-arc {
+  fill: none;
+  stroke: #2ecc71;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.08s linear;
+}
+
 .vitals .bar-wrap {
   display: grid;
   grid-template-columns: 44px 1fr 36px;

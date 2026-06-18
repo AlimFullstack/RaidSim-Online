@@ -16,13 +16,13 @@ export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
   };
 }
 
-/** Мягкая дыра в тумане — без жёстких граней полигона */
+/** Резкая «дыра фонаря» в чёрном тумане */
 export function fillSoftVision(ctx, px, py, radius) {
   const g = ctx.createRadialGradient(px, py, 0, px, py, radius);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.7, 'rgba(255,255,255,1)');
-  g.addColorStop(0.86, 'rgba(255,255,255,0.65)');
-  g.addColorStop(0.95, 'rgba(255,255,255,0.2)');
+  g.addColorStop(0.75, 'rgba(255,255,255,1)');
+  g.addColorStop(0.88, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.96, 'rgba(255,255,255,0.25)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.beginPath();
@@ -138,6 +138,32 @@ export function canSeePoint(px, py, tx, ty, aim, walls, theme) {
   const inCone = Math.abs(delta) <= theme.coneAngle && d <= theme.coneRange;
   if (!inFoot && !inCone) return false;
   return hasLineOfSight(px, py, tx, ty, walls);
+}
+
+/** @param {import('./entities.js').SmokeZone[]} smokes */
+export function isBlockedBySmoke(px, py, tx, ty, smokes) {
+  return isBlindedBySmoke(px, py, tx, ty, smokes);
+}
+
+function isBlindedBySmoke(ax, ay, tx, ty, smokes) {
+  const segLen = Math.hypot(tx - ax, ty - ay);
+  if (segLen < 6) return false;
+  for (const s of smokes) {
+    if (!s || s.life <= 0) continue;
+    const dTo = Math.hypot(tx - s.x, ty - s.y);
+    const dFrom = Math.hypot(ax - s.x, ay - s.y);
+    if (dTo >= s.r) continue;
+    if (dFrom <= dTo) continue;
+    const dx = tx - ax;
+    const dy = ty - ay;
+    const lenSq = dx * dx + dy * dy;
+    let t = ((s.x - ax) * dx + (s.y - ay) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const lx = ax + t * dx;
+    const ly = ay + t * dy;
+    if (Math.hypot(s.x - lx, s.y - ly) < s.r * 0.92) return true;
+  }
+  return false;
 }
 
 /** @param {CanvasRenderingContext2D} ctx @param {{x:number,y:number}[]} points @param {number} px @param {number} py */

@@ -16,6 +16,7 @@ export function parseMapConfig(raw) {
     y: toPx(w.y),
     w: toPx(w.w),
     h: toPx(w.h),
+    kind: w.kind || (w.m ? 'border' : 'cover'),
   }));
 
   const pt = (p) => ({ x: toPx(p.x), y: toPx(p.y) });
@@ -81,4 +82,9 @@ export function getMapList() {
 
 export function getMapById(mapId) {
   return getMapList().find((m) => m.id === mapId) || getMapList()[0];
+}
+
+export function pickRandomMapId() {
+  const maps = getMapList();
+  return maps[Math.floor(Math.random() * maps.length)].id;
 }

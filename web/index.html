@@ -83,8 +83,14 @@
             </div>
           </div>
 
-          <div class="panel weapon">
+          <div class="panel weapon" id="weapon-panel">
             <div class="panel-head">🔫 ОРУЖИЕ</div>
+            <div id="weapon-reload-wrap" class="weapon-reload-wrap hidden">
+              <svg class="weapon-reload-ring" viewBox="0 0 36 36" aria-hidden="true">
+                <circle class="weapon-reload-track" cx="18" cy="18" r="15" />
+                <circle id="weapon-reload-arc" class="weapon-reload-arc" cx="18" cy="18" r="15" />
+              </svg>
+            </div>
             <div id="weapon-name">—</div>
             <div id="ammo">—</div>
             <div id="weapon-hint" class="hint">Нет оружия · возьми в рюкзак</div>

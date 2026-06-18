@@ -12,7 +12,7 @@ import {
 export const RAID_MODES = {
   standard: { id: 'standard', name: 'Стандарт', duration: 5 * 60, desc: '5 минут, полный лут' },
   quick: { id: 'quick', name: 'Быстрый', duration: 2 * 60, desc: '2 минуты, +20% XP' },
-  boss: { id: 'boss', name: 'Босс-рейд', duration: 10 * 60, desc: 'Босс в центре, редкий лут' },
+  boss: { id: 'boss', name: 'Босс-рейд', duration: 6 * 60, desc: '6 минут, босс в центре, редкий лут' },
 };
 
 export const SHOP_ITEMS = [

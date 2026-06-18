@@ -28,6 +28,7 @@ import {
   drawThematicWalls,
   drawMapAmbienceOverlay,
 } from './map-atmosphere.js';
+import { isBlindedBySmoke } from './scav-ai.js';
 
 export class Input {
   constructor(canvas) {
@@ -281,6 +282,7 @@ export class Player extends Entity {
     this.reserve = 36;
     this.fireCooldown = 0;
     this.reloadTime = 0;
+    this.reloadDuration = 0;
     this.backpack = emptyBackpack();
     this.equipped = { weapon: null, armor: null };
     this.maxInv = BACKPACK_SIZE;
@@ -582,9 +584,10 @@ export class Player extends Entity {
     this.isSprinting = (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving;
     this.isFiring = combat && this.canShoot() && input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
 
-    const baseSpeed = this.isSprinting ? 260 : 180;
+    const baseSpeed = this.isSprinting ? 200 : 140;
     const shootSlow = this.isFiring || this.fireCooldown > this.fireRate * 0.4;
-    this.speed = shootSlow ? baseSpeed * 0.5 : baseSpeed;
+    const reloading = this.reloadTime > 0;
+    this.speed = reloading ? baseSpeed * 0.35 : shootSlow ? baseSpeed * 0.5 : baseSpeed;
 
     this.move(dx, dy, dt);
     this.noiseLevel = this.isSprinting ? 1 : this.isMoving ? 0.4 : 0;
@@ -620,7 +623,8 @@ export class Player extends Entity {
           this.reserve += pulled;
         }
         if (this.reserve > 0 && this.reloadTime <= 0) {
-          this.reloadTime = this.weaponDef?.reloadTime || 1.4;
+          this.reloadDuration = this.weaponDef?.reloadTime || 1.4;
+          this.reloadTime = this.reloadDuration;
         }
       }
     }
@@ -703,9 +707,19 @@ export class Player extends Entity {
   draw(ctx) {
     this.drawSpreadCone(ctx);
 
+    if (this.reloadTime > 0 && this.reloadDuration > 0) {
+      const prog = 1 - this.reloadTime / this.reloadDuration;
+      ctx.strokeStyle = 'rgba(46, 204, 113, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
+      ctx.stroke();
+    }
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
+    if (this.reloadTime > 0) ctx.translate(0, 4);
 
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
@@ -782,21 +796,34 @@ export class Player extends Entity {
 export class Scav extends Entity {
   constructor(x, y, walls = [], opts = {}) {
     super(x, y, opts.isBoss ? 20 : 15, walls);
+    this.isBoss = !!opts.isBoss;
     this.state = 'patrol';
     this.targetX = x;
     this.targetY = y;
+    this.homeX = x;
+    this.homeY = y;
     this.wait = 0;
     this.fireCooldown = 0;
-    this.speed = opts.isBoss ? 90 : 120;
-    this.vision = opts.isBoss ? 320 : 260;
-    this.name = opts.isBoss ? 'Босс' : 'Scav';
-    this.isBoss = !!opts.isBoss;
-    this.hp = opts.isBoss ? 200 : 100;
+    this.speed = this.isBoss ? 130 : 85;
+    this.vision = this.isBoss ? 340 : 260;
+    this.name = this.isBoss ? 'Босс' : 'Scav';
+    this.hp = this.isBoss ? 400 : 100;
     this.maxHp = this.hp;
+    this.magSize = this.isBoss ? 24 : 12;
+    this.ammo = this.magSize;
+    this.reloadTime = 0;
+    this.reloadDuration = this.isBoss ? 1.1 : 1.4;
+    this.fireLock = 0;
+    this.isFiring = false;
+    this.bulletDamage = this.isBoss ? 30 : 16;
+    this.lostSightTimer = 0;
+    this.searchTimer = 0;
+    this.searchLook = { x, y };
     this.loot = [];
     this.looted = false;
     this.searchProgress = 0;
     this.alertPos = null;
+    this.spawnedByBoss = !!opts.spawnedByBoss;
   }
 
   onDeath() {
@@ -813,57 +840,144 @@ export class Scav extends Entity {
     this.wait = 1 + Math.random() * 2;
   }
 
-  update(dt, player, bullets, noiseEvents = []) {
+  canSeePlayer(player, smokeZones = []) {
+    if (player.dead) return false;
+    const d = dist(this.x, this.y, player.x, player.y);
+    if (d >= this.vision) return false;
+    if (!this.hasLineOfSight(player.x, player.y)) return false;
+    if (isBlindedBySmoke(this.x, this.y, player.x, player.y, smokeZones)) return false;
+    return true;
+  }
+
+  tryShoot(player, d, dt) {
+    if (this.reloadTime > 0 || this.fireLock > 0) return null;
+    if (this.ammo <= 0) {
+      this.reloadTime = this.reloadDuration;
+      return null;
+    }
+    if (this.fireCooldown > 0) return null;
+    if (d >= 320) return null;
+
+    this.isFiring = true;
+    this.fireLock = 0.12;
+    this.ammo -= 1;
+    this.fireCooldown = this.isBoss
+      ? 0.28 + Math.random() * 0.08
+      : 0.38 + Math.random() * 0.1;
+    const spread = (Math.random() - 0.5) * 0.15;
+    return new Bullet(
+      this.x + Math.cos(this.angle) * 18,
+      this.y + Math.sin(this.angle) * 18,
+      this.angle + spread,
+      'scav',
+      this.bulletDamage,
+      this.walls
+    );
+  }
+
+  update(dt, player, bullets, noiseEvents = [], smokeZones = []) {
     if (this.dead) return null;
 
     for (const n of noiseEvents) {
       if (dist(this.x, this.y, n.x, n.y) < n.radius) {
         this.alertPos = { x: n.x, y: n.y };
-        this.state = 'investigate';
+        if (this.state !== 'attack') this.state = 'investigate';
       }
     }
 
-    const d = dist(this.x, this.y, player.x, player.y);
-    const seesPlayer = d < this.vision && this.hasLineOfSight(player.x, player.y);
+    if (this.reloadTime > 0) {
+      this.reloadTime -= dt;
+      if (this.reloadTime <= 0) this.ammo = this.magSize;
+      this.isFiring = false;
+      return null;
+    }
+    if (this.fireLock > 0) this.fireLock -= dt;
+    if (this.fireCooldown > 0) this.fireCooldown -= dt;
+    if (this.fireLock <= 0) this.isFiring = false;
 
-    if (seesPlayer && !player.dead) {
+    const d = dist(this.x, this.y, player.x, player.y);
+    const seesPlayer = this.canSeePlayer(player, smokeZones);
+
+    if (seesPlayer) {
       this.state = 'attack';
       this.alertPos = null;
-      this.angle = Math.atan2(player.y - this.y, player.x - this.x);
-      const dx = player.x - this.x;
-      const dy = player.y - this.y;
-      if (d > 140) this.move(dx, dy, dt * 0.7);
-      else if (d < 90) this.move(-dx, -dy, dt * 0.5);
-
-      this.fireCooldown -= dt;
-      if (this.fireCooldown <= 0 && d < 320) {
-        this.fireCooldown = 0.55 + Math.random() * 0.4;
-        const spread = (Math.random() - 0.5) * 0.15;
-        return new Bullet(
-          this.x + Math.cos(this.angle) * 18,
-          this.y + Math.sin(this.angle) * 18,
-          this.angle + spread,
-          'scav',
-          this.isBoss ? 20 : 14,
-          this.walls
-        );
+      this.lostSightTimer = 0;
+    } else if (this.state === 'attack') {
+      this.lostSightTimer += dt;
+      if (this.lostSightTimer > 2.5) {
+        this.state = this.alertPos ? 'search' : 'return';
+        this.lostSightTimer = 0;
+        if (this.state === 'return') this.alertPos = null;
       }
-    } else if (this.state === 'investigate' && this.alertPos) {
+    }
+
+    if (this.state === 'attack') {
+      this.angle = Math.atan2(player.y - this.y, player.x - this.x);
+      const canMove = this.fireLock <= 0 && !this.isFiring && this.fireCooldown <= 0;
+      if (canMove) {
+        if (d > 140) this.move(player.x - this.x, player.y - this.y, dt * 0.65);
+        else if (d < 90) this.move(this.x - player.x, this.y - player.y, dt * 0.45);
+      }
+      return this.tryShoot(player, d, dt);
+    }
+
+    if (this.state === 'investigate' && this.alertPos) {
       const pdx = this.alertPos.x - this.x;
       const pdy = this.alertPos.y - this.y;
-      if (Math.hypot(pdx, pdy) > 20) this.move(pdx, pdy, dt * 0.8);
-      else {
-        this.state = 'patrol';
+      if (Math.hypot(pdx, pdy) > 24) {
+        this.move(pdx, pdy, dt * 0.75);
+        this.angle = Math.atan2(pdy, pdx);
+      } else {
+        this.state = 'search';
+        this.searchTimer = 3 + Math.random() * 2;
+        this.searchLook = { x: this.x, y: this.y };
+      }
+      return null;
+    }
+
+    if (this.state === 'search') {
+      this.searchTimer -= dt;
+      const sdx = this.searchLook.x - this.x;
+      const sdy = this.searchLook.y - this.y;
+      if (Math.hypot(sdx, sdy) > 12) {
+        this.move(sdx, sdy, dt * 0.5);
+        this.angle = Math.atan2(sdy, sdx);
+      } else if (Math.random() < dt * 0.35) {
+        this.searchLook = {
+          x: this.x + (Math.random() - 0.5) * 80,
+          y: this.y + (Math.random() - 0.5) * 80,
+        };
+      }
+      if (this.searchTimer <= 0) {
+        this.state = 'return';
         this.alertPos = null;
       }
+      return null;
+    }
+
+    if (this.state === 'return') {
+      const pdx = this.homeX - this.x;
+      const pdy = this.homeY - this.y;
+      if (Math.hypot(pdx, pdy) > 20) {
+        this.move(pdx, pdy, dt * 0.6);
+        this.angle = Math.atan2(pdy, pdx);
+      } else {
+        this.state = 'patrol';
+        this.wait = 1 + Math.random();
+      }
+      return null;
+    }
+
+    this.state = 'patrol';
+    this.wait -= dt;
+    if (this.wait <= 0) this.pickPatrol();
+    const pdx = this.targetX - this.x;
+    const pdy = this.targetY - this.y;
+    if (Math.hypot(pdx, pdy) > 12) {
+      this.move(pdx, pdy, dt * 0.55);
+      this.angle = Math.atan2(pdy, pdx);
     } else {
-      this.state = 'patrol';
-      this.wait -= dt;
-      if (this.wait <= 0) this.pickPatrol();
-      const pdx = this.targetX - this.x;
-      const pdy = this.targetY - this.y;
-      if (Math.hypot(pdx, pdy) > 12) this.move(pdx, pdy, dt * 0.6);
-      else this.angle = Math.random() * Math.PI * 2;
+      this.angle = Math.random() * Math.PI * 2;
     }
     return null;
   }
@@ -872,6 +986,15 @@ export class Scav extends Entity {
     if (this.dead) {
       this.drawCorpse(ctx);
       return;
+    }
+
+    if (this.reloadTime > 0) {
+      const prog = 1 - this.reloadTime / this.reloadDuration;
+      ctx.strokeStyle = 'rgba(255, 200, 60, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
+      ctx.stroke();
     }
 
     ctx.save();
@@ -893,11 +1016,11 @@ export class Scav extends Entity {
 
     ctx.restore();
 
-    if (!this.dead && this.state === 'attack') {
-      ctx.fillStyle = '#ff6b6b';
+    if (!this.dead && (this.state === 'attack' || this.state === 'search')) {
+      ctx.fillStyle = this.state === 'search' ? '#f5e6a8' : '#ff6b6b';
       ctx.font = '11px JetBrains Mono';
       ctx.textAlign = 'center';
-      ctx.fillText('!', this.x, this.y - 22);
+      ctx.fillText(this.state === 'search' ? '?' : '!', this.x, this.y - 22);
     }
   }
 
@@ -992,12 +1115,68 @@ export class GroundItem {
   }
 }
 
+export class ThrownGrenade {
+  constructor(x, y, targetX, targetY, walls, opts = {}) {
+    this.x = x;
+    this.y = y;
+    this.walls = walls;
+    this.kind = opts.kind || 'frag';
+    this.dead = false;
+    this.r = 6;
+
+    const dx = targetX - x;
+    const dy = targetY - y;
+    const raw = Math.hypot(dx, dy) || 1;
+    const minD = opts.minDist ?? 80;
+    const maxD = opts.maxDist ?? 280;
+    const d = Math.max(minD, Math.min(maxD, raw));
+    const angle = Math.atan2(dy, dx);
+    this.tx = x + Math.cos(angle) * d;
+    this.ty = y + Math.sin(angle) * d;
+    this.startX = x;
+    this.startY = y;
+    this.flightTime = opts.flightTime ?? 0.62;
+    this.elapsed = 0;
+    this.arcHeight = opts.arcHeight ?? 48;
+  }
+
+  update(dt) {
+    if (this.dead) return;
+    this.elapsed += dt;
+    const t = Math.min(1, this.elapsed / this.flightTime);
+    const nx = this.startX + (this.tx - this.startX) * t;
+    const ny = this.startY + (this.ty - this.startY) * t - Math.sin(t * Math.PI) * this.arcHeight;
+    this.x = nx;
+    this.y = ny;
+
+    for (const w of this.walls) {
+      if (circleRectCollision(this.x, this.y, this.r, w)) {
+        this.dead = true;
+        return;
+      }
+    }
+    if (t >= 1) this.dead = true;
+  }
+
+  draw(ctx) {
+    if (this.dead) return;
+    ctx.fillStyle = this.kind === 'smoke' ? '#6a7a6a' : '#4a5a42';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8a9a7a';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
 export class SmokeZone {
   constructor(x, y) {
     this.x = x;
     this.y = y;
-    this.r = 120;
-    this.life = 8;
+    this.r = 200;
+    this.life = 12;
+    this.maxLife = 12;
   }
 
   update(dt) {
@@ -1005,10 +1184,15 @@ export class SmokeZone {
   }
 
   draw(ctx) {
-    ctx.fillStyle = 'rgba(120, 120, 120, 0.25)';
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-    ctx.fill();
+    const alpha = 0.45 * Math.min(1, this.life / 2);
+    for (let i = 0; i < 3; i++) {
+      const off = i * 18;
+      const gr = this.r - off * 0.35;
+      ctx.fillStyle = `rgba(100, 105, 100, ${alpha * (0.85 - i * 0.2)})`;
+      ctx.beginPath();
+      ctx.arc(this.x + off * 0.3, this.y - off * 0.2, gr, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 

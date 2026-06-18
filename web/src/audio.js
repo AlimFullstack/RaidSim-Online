@@ -167,9 +167,31 @@ const SOUNDS = {
       tone(ctx, dest, 60, 'triangle', 0.1, 0.15, 30, 0.015);
     }
   },
-  shootEnemy(ctx, dest) {
-    noise(ctx, dest, 0.05, 0.3);
-    tone(ctx, dest, 120, 'square', 0.06, 0.25, 60);
+  shootEnemy(ctx, dest, opts = {}) {
+    if (opts.boss) {
+      noise(ctx, dest, 0.07, 0.42);
+      tone(ctx, dest, 85, 'square', 0.08, 0.32, 45);
+      tone(ctx, dest, 55, 'sawtooth', 0.1, 0.22, 35, 0.02);
+    } else {
+      noise(ctx, dest, 0.05, 0.32);
+      tone(ctx, dest, 120, 'square', 0.06, 0.28, 60);
+      tone(ctx, dest, 200, 'triangle', 0.04, 0.12, 140, 0.01);
+    }
+  },
+  enemyReload(ctx, dest) {
+    tone(ctx, dest, 280, 'square', 0.05, 0.18, 220);
+    noise(ctx, dest, 0.04, 0.12, 0.08);
+  },
+  enemyReloadBoss(ctx, dest) {
+    tone(ctx, dest, 180, 'square', 0.06, 0.22, 120);
+    noise(ctx, dest, 0.05, 0.16, 0.06);
+  },
+  enemyReloadDone(ctx, dest) {
+    tone(ctx, dest, 360, 'sine', 0.05, 0.14, 420);
+  },
+  grenadeThrow(ctx, dest) {
+    noise(ctx, dest, 0.08, 0.12);
+    tone(ctx, dest, 240, 'sine', 0.12, 0.15, 120);
   },
   hit(ctx, dest) {
     tone(ctx, dest, 90, 'triangle', 0.08, 0.4, 40);
@@ -285,35 +307,36 @@ function startDrone(audio, freq, type, vol) {
 const MUSIC = {
   lobby(audio) {
     const { ctx, musicGain } = audio;
-    startDrone(audio, 55, 'sine', 0.08);
-    startDrone(audio, 82, 'triangle', 0.04);
+    startDrone(audio, 52, 'sine', 0.075);
+    startDrone(audio, 78, 'triangle', 0.038);
 
-    const notes = [220, 262, 294, 330, 294, 262];
+    const notes = [196, 220, 247, 262, 247, 220];
     let i = 0;
     const playNote = () => {
       if (audio.currentTrack !== 'lobby') return;
       const freq = notes[i % notes.length];
-      tone(ctx, musicGain, freq, 'sine', 1.8, 0.06, freq * 1.01);
+      tone(ctx, musicGain, freq, 'sine', 1.6, 0.055, freq * 1.008);
       i += 1;
     };
     playNote();
-    audio.musicTimer = setInterval(playNote, 2200);
+    audio.musicTimer = setInterval(playNote, 2000);
   },
 
   raid(audio) {
     const { ctx, musicGain } = audio;
-    startDrone(audio, 45, 'sine', 0.1);
-    startDrone(audio, 48, 'triangle', 0.05);
+    startDrone(audio, 42, 'sine', 0.11);
+    startDrone(audio, 50, 'triangle', 0.055);
 
-    const notes = [110, 123, 130, 123, 98, 110];
+    const notes = [98, 110, 123, 110, 87, 98];
     let i = 0;
     const playNote = () => {
       if (audio.currentTrack !== 'raid') return;
       const freq = notes[i % notes.length];
-      tone(ctx, musicGain, freq, 'triangle', 2.2, 0.05, freq * 0.98);
+      tone(ctx, musicGain, freq, 'triangle', 2.4, 0.055, freq * 0.97);
+      noise(ctx, musicGain, 0.04, 0.018);
       i += 1;
     };
     playNote();
-    audio.musicTimer = setInterval(playNote, 2800);
+    audio.musicTimer = setInterval(playNote, 2600);
   },
 };

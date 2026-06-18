@@ -9,7 +9,7 @@ import {
   getSurvivalRate,
   ensureMigratedProfile,
 } from './profile.js';
-import { getMapList, getMapById } from './map-loader.js';
+import { getMapList, getMapById, pickRandomMapId } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
 import { emptyBackpack, cloneBackpack, loadoutHasWeapon, cloneEquipped } from './inventory-core.js';
@@ -408,7 +408,11 @@ export class Lobby {
       loadout: { backpack: emptyBackpack(), equipped: { weapon: null, armor: null } },
     };
     if (!this.auth.isGuest()) await this.persistProfile(null);
-    this.callbacks.onPlay(this.selectedMode, { backpack, equipped }, this.selectedMap);
+    const mapId = pickRandomMapId();
+    this.selectedMap = mapId;
+    this.renderMaps();
+    this.renderBriefing();
+    this.callbacks.onPlay(this.selectedMode, { backpack, equipped }, mapId);
   }
 
   renderStash() {
@@ -618,7 +622,7 @@ export class Lobby {
       <div class="briefing-title">БРИФИНГ РЕЙДА</div>
       <div class="briefing-row">
         <span class="briefing-label">Карта</span>
-        <span class="briefing-value">${map.name} · ${map.timeLabel}</span>
+        <span class="briefing-value">${map.name} · ${map.timeLabel} · случайно при старте</span>
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Режим</span>
@@ -643,7 +647,7 @@ export class Lobby {
     if (!this.el.deployBtn) return;
     const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
-    this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">${map.name} · ${this.formatDuration(mode.duration)}</span>`;
+    this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">случайная карта · ${this.formatDuration(mode.duration)}</span>`;
   }
 
   render() {

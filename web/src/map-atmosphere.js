@@ -13,7 +13,7 @@ export const MAP_THEMES = {
     rust: 'rgba(120, 58, 28, 0.35)',
     oil: 'rgba(18, 14, 10, 0.55)',
     hazard: '#c9a227',
-    fogColor: 'rgba(6, 5, 3, 0.52)',
+    fogColor: 'rgba(0, 0, 0, 1)',
     fogTint: 'rgba(48, 32, 12, 0.1)',
     visionRadius: 155,
     coneRange: 270,
@@ -33,7 +33,7 @@ export const MAP_THEMES = {
     rust: 'rgba(40, 60, 100, 0.25)',
     oil: 'rgba(8, 16, 32, 0.5)',
     hazard: '#3a7ab8',
-    fogColor: 'rgba(2, 4, 14, 0.5)',
+    fogColor: 'rgba(0, 0, 0, 1)',
     fogTint: 'rgba(12, 20, 48, 0.14)',
     visionRadius: 125,
     coneRange: 250,
@@ -130,47 +130,67 @@ export function drawMapDecor(ctx, mapConfig, time = 0) {
 
 export function drawThematicWalls(ctx, walls, theme) {
   for (const w of walls) {
+    const kind = w.kind || 'cover';
+    if (kind === 'border') {
+      ctx.fillStyle = theme.wallShadow;
+      ctx.fillRect(w.x + 4, w.y + 5, w.w, w.h);
+      ctx.fillStyle = theme.wall;
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      continue;
+    }
+
     ctx.fillStyle = theme.wallShadow;
     ctx.fillRect(w.x + 5, w.y + 6, w.w, w.h);
 
     const top = ctx.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
-    top.addColorStop(0, theme.wallTop);
-    top.addColorStop(0.35, theme.wall);
-    top.addColorStop(1, '#181410');
+    if (kind === 'crate') {
+      top.addColorStop(0, theme.wallTop);
+      top.addColorStop(0.4, theme.wall);
+      top.addColorStop(1, '#1a1610');
+    } else if (kind === 'room') {
+      top.addColorStop(0, '#4a4438');
+      top.addColorStop(1, '#222018');
+    } else {
+      top.addColorStop(0, theme.wallTop);
+      top.addColorStop(0.35, theme.wall);
+      top.addColorStop(1, '#181410');
+    }
     ctx.fillStyle = top;
     ctx.fillRect(w.x, w.y, w.w, w.h);
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, Math.min(8, w.h * 0.15));
+    if (kind === 'crate') {
+      ctx.strokeStyle = theme.accent || '#8a7a4a';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(w.x + 1, w.y + 1, w.w - 2, w.h - 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(w.x + w.w * 0.2, w.y + 2);
+      ctx.lineTo(w.x + w.w * 0.2, w.y + w.h - 2);
+      ctx.moveTo(w.x + w.w * 0.8, w.y + 2);
+      ctx.lineTo(w.x + w.w * 0.8, w.y + w.h - 2);
+      ctx.stroke();
+    } else if (kind === 'room') {
+      ctx.strokeStyle = 'rgba(200, 180, 120, 0.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, Math.min(8, w.h * 0.15));
+    }
 
     ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1;
     ctx.strokeRect(w.x + 0.5, w.y + 0.5, w.w - 1, w.h - 1);
   }
 }
 
 export function drawMapAmbienceOverlay(ctx, mapConfig, time = 0) {
-  const theme = getMapTheme(mapConfig?.theme);
-  const mapW = mapConfig?.mapW || 2400;
-  const mapH = mapConfig?.mapH || 2400;
   const isNight = mapConfig?.theme === 'night';
-
-  const haze = ctx.createLinearGradient(0, 0, 0, mapH);
-  if (isNight) {
-    haze.addColorStop(0, 'rgba(8, 12, 28, 0.28)');
-    haze.addColorStop(0.5, 'rgba(4, 6, 16, 0.08)');
-    haze.addColorStop(1, 'rgba(2, 4, 12, 0.3)');
-  } else {
-    haze.addColorStop(0, 'rgba(30, 22, 10, 0.2)');
-    haze.addColorStop(0.5, 'rgba(10, 8, 4, 0.04)');
-    haze.addColorStop(1, 'rgba(20, 16, 8, 0.22)');
-  }
-  ctx.fillStyle = haze;
-  ctx.fillRect(0, 0, mapW, mapH);
-
   if (isNight) {
     const pulse = 0.85 + Math.sin(time * 1.5) * 0.08;
-    ctx.fillStyle = `rgba(4, 8, 24, ${0.18 * pulse})`;
-    ctx.fillRect(0, 0, mapW, mapH);
+    ctx.fillStyle = `rgba(4, 8, 24, ${0.06 * pulse})`;
+    ctx.fillRect(0, 0, mapConfig?.mapW || 2400, mapConfig?.mapH || 2400);
   }
 }

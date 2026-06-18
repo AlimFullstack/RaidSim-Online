@@ -7,13 +7,14 @@ import {
   setMapBounds,
 } from './map-core.js';
 import { loadMap } from './map-loader.js';
-import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, GroundItem, drawMap } from './entities.js';
+import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, GroundItem, ThrownGrenade, drawMap } from './entities.js';
 import { RAID_MODES } from './profile.js';
 import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint, buildVisionTheme } from './visibility.js';
+import { canSeePoint, buildVisionTheme, isBlockedBySmoke } from './visibility.js';
+import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
@@ -56,6 +57,9 @@ export class Game {
     this.smokeZones = [];
     this.playerCorpse = null;
     this.grenadeCooldown = 0;
+    this.thrownGrenades = [];
+    this.bossReinforceTimer = 30;
+    this.bossReinforceCount = 0;
     this.searchSoundTimer = 0;
     this.wasInExtract = false;
     this.scavAlerted = new Set();
@@ -93,6 +97,9 @@ export class Game {
       this.scavs.push(boss);
     }
     this.smokeZones = [];
+    this.thrownGrenades = [];
+    this.bossReinforceTimer = 30;
+    this.bossReinforceCount = 0;
     this.groundItems = [];
     this.playerCorpse = null;
     this.noiseEvents = [];
@@ -128,10 +135,10 @@ export class Game {
     this.ui.setStatus(msg, kind);
   }
 
-  emitNoise(x, y, level) {
-    const radius = 80 + level * 200;
-    this.noiseEvents.push({ x, y, radius, life: 2 });
-    this.fx.noiseRipple(x, y, radius * 0.5);
+  emitNoise(x, y, level, opts = {}) {
+    const radius = 200 + level * 320;
+    this.noiseEvents.push({ x, y, radius, life: 2.5 });
+    if (opts.visual) this.fx.noiseRipple(x, y, radius * 0.35);
   }
 
   update(dt) {
@@ -197,13 +204,14 @@ export class Game {
         const g = p.useSelectedGrenade();
         if (g.ok) {
           this.grenadeCooldown = 1;
-          this.emitNoise(p.x, p.y, 1);
-          this.audio?.play('grenade');
-          this.fx.explosion(p.x + Math.cos(p.angle) * 40, p.y + Math.sin(p.angle) * 40, 100);
-          for (const scav of this.scavs) {
-            if (scav.dead) continue;
-            if (dist(p.x, p.y, scav.x, scav.y) < 100) scav.takeDamage(45);
-          }
+          this.thrownGrenades.push(
+            new ThrownGrenade(p.x, p.y, this.input.mouse.worldX, this.input.mouse.worldY, this.activeMap.walls, {
+              kind: 'frag',
+              minDist: 80,
+              maxDist: 280,
+            })
+          );
+          this.audio?.play('grenadeThrow');
           this.setStatus('Граната!', 1.5, 'combat');
           this._hudCache = '';
           if (this.inventoryUi.open) this.inventoryUi.render();
@@ -211,12 +219,19 @@ export class Game {
           this.setStatus(g.msg, 1.2, 'fail');
         }
       }
-      if (this.input.tapped('KeyV')) {
+      if (this.input.tapped('KeyV') && this.grenadeCooldown <= 0) {
         const s = p.useSelectedSmoke();
         if (s.ok) {
-          this.smokeZones.push(new SmokeZone(p.x, p.y));
-          this.audio?.play('smoke');
-          this.fx.smokePuff(p.x, p.y);
+          this.grenadeCooldown = 0.8;
+          this.thrownGrenades.push(
+            new ThrownGrenade(p.x, p.y, this.input.mouse.worldX, this.input.mouse.worldY, this.activeMap.walls, {
+              kind: 'smoke',
+              minDist: 60,
+              maxDist: 220,
+              flightTime: 0.55,
+            })
+          );
+          this.audio?.play('grenadeThrow');
           this.setStatus(s.msg, 1.5, 'combat');
           this._hudCache = '';
           if (this.inventoryUi.open) this.inventoryUi.render();
@@ -267,7 +282,7 @@ export class Game {
         this.fx.muzzleFlash(mx, my, p.angle, flashColor, flashSize);
         if (shot.recoilKick) this.fx.kickCamera(shot.recoilKick, p.angle);
         if (shot.shellEject) this.fx.shellCasing(p.x, p.y, p.angle);
-        if (p.noiseLevel > 0.5) this.emitNoise(p.x, p.y, p.noiseLevel);
+        this.emitNoise(p.x, p.y, 1, { visual: true });
       } else if (
         combat &&
         this.input.mouse.justDown &&
@@ -290,17 +305,27 @@ export class Game {
         this.audio?.play('empty');
         this.emptyClickCooldown = 0.35;
         this.fx.muzzleFlash(p.x + Math.cos(p.angle) * 18, p.y + Math.sin(p.angle) * 18, p.angle, '#888');
-      } else if (p.noiseLevel > 0 && p.noiseLevel < 0.5) {
-        this.emitNoise(p.x, p.y, 0.3);
+      } else if (p.noiseLevel > 0) {
+        this.emitNoise(p.x, p.y, p.noiseLevel > 0.5 ? 1 : 0.35);
       }
 
       this.handleInteract(dt);
       this.handleExtract(dt);
     }
 
+    this.updateThrownGrenades(dt);
+    this.updateBossReinforcements(dt);
+
     for (const scav of this.scavs) {
+      const wasReloading = scav.reloadTime > 0;
       const wasAttack = scav.state === 'attack';
-      const b = scav.update(dt, p, this.bullets, this.noiseEvents);
+      const b = scav.update(dt, p, this.bullets, this.noiseEvents, this.smokeZones);
+      if (!wasReloading && scav.reloadTime > 0) {
+        this.audio?.play(scav.isBoss ? 'enemyReloadBoss' : 'enemyReload');
+      }
+      if (wasReloading && scav.reloadTime <= 0 && scav.ammo > 0) {
+        this.audio?.play('enemyReloadDone');
+      }
       if (!wasAttack && scav.state === 'attack' && !this.scavAlerted.has(scav)) {
         this.scavAlerted.add(scav);
         this.audio?.play('alert');
@@ -308,7 +333,8 @@ export class Game {
       }
       if (b) {
         this.bullets.push(b);
-        this.audio?.play('shootEnemy');
+        this.audio?.play('shootEnemy', { boss: scav.isBoss });
+        this.emitNoise(scav.x, scav.y, scav.isBoss ? 1.1 : 0.95, { visual: true });
         this.fx.muzzleFlash(
           scav.x + Math.cos(scav.angle) * 18,
           scav.y + Math.sin(scav.angle) * 18,
@@ -346,7 +372,56 @@ export class Game {
       viewH,
       p.hp / p.maxHp
     );
-    return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme);
+    return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme)
+      && !isBlockedBySmoke(p.x, p.y, wx, wy, this.smokeZones);
+  }
+
+  updateThrownGrenades(dt) {
+    for (const g of this.thrownGrenades) {
+      if (g.dead) continue;
+      g.update(dt);
+      if (!g.dead) continue;
+      if (g.kind === 'frag') {
+        this.emitNoise(g.x, g.y, 1.2, { visual: true });
+        this.audio?.play('grenade');
+        this.fx.explosion(g.x, g.y, 90);
+        for (const scav of this.scavs) {
+          if (scav.dead) continue;
+          const d = dist(g.x, g.y, scav.x, scav.y);
+          if (d < 90) {
+            const falloff = 1 - d / 90;
+            scav.takeDamage(Math.round(50 * falloff));
+          }
+        }
+        const p = this.player;
+        if (p && !p.dead && dist(g.x, g.y, p.x, p.y) < 90) {
+          const d = dist(g.x, g.y, p.x, p.y);
+          p.takeDamage(Math.round(35 * (1 - d / 90)));
+          this.fx.damageScreen(20);
+        }
+      } else if (g.kind === 'smoke') {
+        this.smokeZones.push(new SmokeZone(g.x, g.y));
+        this.fx.smokePuff(g.x, g.y);
+      }
+    }
+    this.thrownGrenades = this.thrownGrenades.filter((g) => !g.dead);
+  }
+
+  updateBossReinforcements(dt) {
+    if (this.raidMode !== 'boss') return;
+    const boss = this.scavs.find((s) => s.isBoss && !s.dead);
+    if (!boss) return;
+    this.bossReinforceTimer -= dt;
+    if (this.bossReinforceTimer > 0) return;
+    this.bossReinforceTimer = 30;
+    if (this.bossReinforceCount >= 8) return;
+    const walls = this.activeMap.walls;
+    const spot = findFreeSpawnNear(boss.x, boss.y, walls);
+    const minion = new Scav(spot.x, spot.y, walls, { spawnedByBoss: true });
+    this.scavs.push(minion);
+    this.bossReinforceCount += 1;
+    this.audio?.play('alert');
+    this.fx.floatText(boss.x, boss.y - 32, '+Scav', '#c39bd3');
   }
 
   findNearestInteractable() {
@@ -520,10 +595,15 @@ export class Game {
         for (const scav of this.scavs) {
           if (scav.dead) continue;
           if (dist(b.x, b.y, scav.x, scav.y) < scav.r + b.r) {
+            const wasAlive = !scav.dead;
             scav.takeDamage(b.damage);
             b.dead = true;
             this.fx.hitSparks(b.x, b.y);
             this.audio?.play('hit');
+            if (wasAlive) {
+              const alertR = scav.isBoss ? 600 : 450;
+              alertNearbyScavs(this.scavs, scav.x, scav.y, alertR, p.x, p.y);
+            }
             if (scav.dead) {
               if (!scav.loot?.length) scav.onDeath();
               p.kills += 1;
@@ -535,9 +615,11 @@ export class Game {
           }
         }
       } else if (b.owner === 'scav' && !p.dead) {
-        let inSmoke = false;
-        for (const s of this.smokeZones) {
-          if (dist(b.x, b.y, s.x, s.y) < s.r) inSmoke = true;
+        let inSmoke = isBlockedBySmoke(p.x, p.y, b.x, b.y, this.smokeZones);
+        if (!inSmoke) {
+          for (const s of this.smokeZones) {
+            if (dist(b.x, b.y, s.x, s.y) < s.r) inSmoke = true;
+          }
         }
         if (!inSmoke && dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
           const armorBefore = p.armor;
@@ -638,8 +720,11 @@ export class Game {
 
     ctx.setTransform(this.scale, 0, 0, this.scale, -this.camRenderX * this.scale, -this.camRenderY * this.scale);
     drawMap(ctx, this.animTime, this.activeMap);
+    for (const g of this.thrownGrenades) {
+      g.draw(ctx);
+    }
     for (const s of this.smokeZones) {
-      if (this.canSee(s.x, s.y)) s.draw(ctx);
+      s.draw(ctx);
     }
     for (const lp of this.lootPoints) {
       if (this.canSee(lp.x, lp.y)) lp.draw(ctx);
@@ -783,8 +868,21 @@ export function createUI() {
       document.getElementById('ammo').textContent = p.canShoot() ? `${p.ammo} / ${p.reserve}` : '—';
       document.getElementById('weapon-name').textContent = p.canShoot() ? p.weaponName || '—' : '—';
       const weaponHint = document.getElementById('weapon-hint');
+      const weaponPanel = document.getElementById('weapon-panel');
+      const reloadWrap = document.getElementById('weapon-reload-wrap');
+      const reloadArc = document.getElementById('weapon-reload-arc');
+      const reloading = p.reloadTime > 0 && p.reloadDuration > 0;
+      if (weaponPanel) weaponPanel.classList.toggle('reloading', reloading);
+      if (reloadWrap) reloadWrap.classList.toggle('hidden', !reloading);
+      if (reloadArc && reloading) {
+        const prog = 1 - p.reloadTime / p.reloadDuration;
+        const circ = 2 * Math.PI * 15;
+        reloadArc.style.strokeDasharray = `${circ * prog} ${circ}`;
+      }
       if (weaponHint) {
-        if (p.canShoot() && p.weaponId === 'pm') {
+        if (reloading) {
+          weaponHint.textContent = `Перезарядка… ${Math.ceil((1 - p.reloadTime / p.reloadDuration) * 100)}%`;
+        } else if (p.canShoot() && p.weaponId === 'pm') {
           weaponHint.textContent = 'Полуавто · стой для выстрела';
         } else if (p.canShoot() && p.semiAuto) {
           weaponHint.textContent = 'Полуавто · клик';
