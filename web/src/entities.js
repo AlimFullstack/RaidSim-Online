@@ -10,6 +10,7 @@ import {
   pointInRect,
   dist,
   clamp,
+  generateScavLoot,
 } from './map.js';
 
 export class Input {
@@ -331,6 +332,15 @@ export class Scav extends Entity {
     this.speed = 120;
     this.vision = 260;
     this.name = 'Scav';
+    this.loot = [];
+    this.looted = false;
+    this.searchProgress = 0;
+  }
+
+  onDeath() {
+    this.loot = generateScavLoot();
+    this.looted = false;
+    this.searchProgress = 0;
   }
 
   pickPatrol() {
@@ -378,6 +388,11 @@ export class Scav extends Entity {
   }
 
   draw(ctx) {
+    if (this.dead) {
+      this.drawCorpse(ctx);
+      return;
+    }
+
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
@@ -402,6 +417,45 @@ export class Scav extends Entity {
       ctx.font = '11px JetBrains Mono';
       ctx.textAlign = 'center';
       ctx.fillText('!', this.x, this.y - 22);
+    }
+  }
+
+  drawCorpse(ctx) {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(this.x, this.y + 5, 14, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#3a3030';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#5a4a4a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.x - 8, this.y - 8);
+    ctx.lineTo(this.x + 8, this.y + 8);
+    ctx.moveTo(this.x + 8, this.y - 8);
+    ctx.lineTo(this.x - 8, this.y + 8);
+    ctx.stroke();
+
+    if (!this.looted) {
+      const t = Date.now() / 300;
+      ctx.globalAlpha = 0.25 + Math.sin(t) * 0.15;
+      ctx.fillStyle = '#c0392b';
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r + 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      if (this.searchProgress > 0) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r + 12, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * this.searchProgress);
+        ctx.stroke();
+      }
     }
   }
 }

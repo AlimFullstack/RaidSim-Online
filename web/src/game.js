@@ -14,12 +14,16 @@ import {
 } from './map.js';
 import { Input, Player, Scav, Bullet, LootPoint, drawMap } from './entities.js';
 
+const INTERACT_RADIUS = 50;
+const SEARCH_TIME = 1.8;
+
 export class Game {
-  constructor(canvas, ui, confetti = null) {
+  constructor(canvas, ui, confetti = null, audio = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.ui = ui;
     this.confetti = confetti;
+    this.audio = audio;
     this.input = new Input(canvas);
     this.state = 'menu';
     this.scale = 1;
@@ -36,9 +40,14 @@ export class Game {
     this.player = null;
     this.extracting = false;
     this.endPayload = null;
+    this.wasReloading = false;
+    this.lastExtractTick = -1;
+    this.nearestInteract = null;
+    this.emptyClickCooldown = 0;
   }
 
   startRaid() {
+    this.audio?.init();
     this.state = 'raid';
     this.raidTimeLeft = RAID_DURATION;
     this.bullets = [];
@@ -48,6 +57,10 @@ export class Game {
     this.extracting = false;
     this.statusMsg = '';
     this.endPayload = null;
+    this.wasReloading = false;
+    this.lastExtractTick = -1;
+    this.nearestInteract = null;
+    this.emptyClickCooldown = 0;
     this.ui.showHud();
     this.ui.hideOverlay();
     this.ui.hideEnd();
@@ -75,21 +88,44 @@ export class Game {
     }
 
     const p = this.player;
+    this.emptyClickCooldown -= dt;
+
     if (!p.dead) {
       if (this.input.tapped('KeyF')) {
         if (p.useMedkit()) this.setStatus('Использована аптечка');
       }
 
-      const bullet = p.update(this.input, dt);
-      if (bullet) this.bullets.push(bullet);
+      const reloading = p.reloadTime > 0;
+      if (this.wasReloading && !reloading && p.ammo > 0) {
+        this.audio?.play('reload');
+      }
+      this.wasReloading = reloading;
 
-      this.handleLoot(dt);
+      const bullet = p.update(this.input, dt);
+      if (bullet) {
+        this.bullets.push(bullet);
+        this.audio?.play('shoot');
+      } else if (
+        this.input.mouse.down &&
+        p.ammo <= 0 &&
+        p.reloadTime <= 0 &&
+        p.fireCooldown <= 0 &&
+        this.emptyClickCooldown <= 0
+      ) {
+        this.audio?.play('empty');
+        this.emptyClickCooldown = 0.35;
+      }
+
+      this.handleInteract(dt);
       this.handleExtract(dt);
     }
 
     for (const scav of this.scavs) {
       const b = scav.update(dt, p, this.bullets);
-      if (b) this.bullets.push(b);
+      if (b) {
+        this.bullets.push(b);
+        this.audio?.play('shootEnemy');
+      }
     }
 
     this.updateBullets(dt);
@@ -103,34 +139,76 @@ export class Game {
     this.input.endFrame();
   }
 
-  handleLoot(dt) {
+  findNearestInteractable() {
     const p = this.player;
-    let near = null;
-    let nearDist = Infinity;
+    let best = null;
+    let bestDist = Infinity;
 
-    for (const lp of this.lootPoints) {
-      if (lp.searched) continue;
-      const d = dist(p.x, p.y, lp.x, lp.y);
-      if (d < 50 && d < nearDist) {
-        near = lp;
-        nearDist = d;
+    for (const scav of this.scavs) {
+      if (!scav.dead || scav.looted) continue;
+      const d = dist(p.x, p.y, scav.x, scav.y);
+      if (d < INTERACT_RADIUS && d < bestDist) {
+        best = { type: 'corpse', target: scav, x: scav.x, y: scav.y, d };
+        bestDist = d;
       }
     }
 
     for (const lp of this.lootPoints) {
-      lp.searching = lp === near && this.input.pressed('KeyE');
+      if (lp.searched) continue;
+      const d = dist(p.x, p.y, lp.x, lp.y);
+      if (d < INTERACT_RADIUS && d < bestDist) {
+        best = { type: 'loot', target: lp, x: lp.x, y: lp.y, d };
+        bestDist = d;
+      }
     }
 
-    if (!near || !this.input.pressed('KeyE')) return;
+    return best;
+  }
 
-    near.progress += dt / 1.8;
-    if (near.progress < 1) return;
+  handleInteract(dt) {
+    const p = this.player;
+    const near = this.findNearestInteractable();
+    this.nearestInteract = near;
 
-    near.searched = true;
-    near.searching = false;
-    const item = rollLoot(near.tier);
-    const result = p.addLoot(item);
-    this.setStatus(result.msg, 2.5);
+    for (const lp of this.lootPoints) {
+      lp.searching = near?.type === 'loot' && near.target === lp && this.input.pressed('KeyE');
+    }
+
+    if (!near || !this.input.pressed('KeyE')) {
+      if (near?.type === 'loot') near.target.progress = 0;
+      if (near?.type === 'corpse') near.target.searchProgress = 0;
+      return;
+    }
+
+    if (near.type === 'loot') {
+      near.target.progress += dt / SEARCH_TIME;
+      if (near.target.progress < 1) return;
+
+      near.target.searched = true;
+      near.target.searching = false;
+      near.target.progress = 0;
+      const item = rollLoot(near.target.tier);
+      const result = p.addLoot(item);
+      if (result.ok && item.id !== 'empty') this.audio?.play('loot');
+      this.setStatus(result.msg, 2.5);
+      return;
+    }
+
+    if (near.type === 'corpse') {
+      const scav = near.target;
+      scav.searchProgress += dt / SEARCH_TIME;
+      if (scav.searchProgress < 1) return;
+
+      scav.looted = true;
+      scav.searchProgress = 0;
+      const msgs = [];
+      for (const item of scav.loot) {
+        const result = p.addLoot(item);
+        if (result.ok) msgs.push(result.msg);
+      }
+      this.audio?.play('loot');
+      this.setStatus(msgs.length ? `Обыск Scav: ${msgs.join(', ')}` : 'У Scav ничего не было', 3);
+    }
   }
 
   handleExtract(dt) {
@@ -140,6 +218,11 @@ export class Game {
     if (inside) {
       p.extractProgress += dt;
       this.extracting = true;
+      const tick = Math.floor(p.extractProgress);
+      if (tick > this.lastExtractTick) {
+        this.lastExtractTick = tick;
+        this.audio?.play('extract');
+      }
       if (p.extractProgress >= EXTRACT_TIME) {
         const value = p.inventory.reduce((s, i) => s + (i.value || 0), 0);
         this.endRaid(
@@ -152,6 +235,7 @@ export class Game {
     } else {
       p.extractProgress = 0;
       this.extracting = false;
+      this.lastExtractTick = -1;
     }
   }
 
@@ -168,9 +252,12 @@ export class Game {
           if (dist(b.x, b.y, scav.x, scav.y) < scav.r + b.r) {
             scav.takeDamage(b.damage);
             b.dead = true;
+            this.audio?.play('hit');
             if (scav.dead) {
+              scav.onDeath();
               p.kills += 1;
-              this.setStatus('Scav убит');
+              this.audio?.play('kill');
+              this.setStatus('Scav убит — E чтобы обыскать');
             }
             break;
           }
@@ -179,6 +266,7 @@ export class Game {
         if (dist(b.x, b.y, p.x, p.y) < p.r + b.r) {
           p.takeDamage(b.damage);
           b.dead = true;
+          this.audio?.play('hit');
         }
       }
     }
@@ -197,6 +285,7 @@ export class Game {
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
+    this.audio?.playRaidEnd(type === 'extracted');
     if (type === 'extracted' && this.confetti) {
       this.confetti.burst(150);
     }
@@ -220,6 +309,20 @@ export class Game {
     if (this.player) this.updateCamera();
   }
 
+  drawInteractHint(ctx) {
+    const near = this.nearestInteract;
+    if (!near || this.state !== 'raid') return;
+
+    const label = near.type === 'corpse' ? 'E — обыск Scav' : 'E — поиск лута';
+    ctx.font = '12px JetBrains Mono';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    const tw = ctx.measureText(label).width + 16;
+    ctx.fillRect(near.x - tw / 2, near.y - 42, tw, 20);
+    ctx.fillStyle = near.type === 'corpse' ? '#ff8a80' : '#7ec8ff';
+    ctx.fillText(label, near.x, near.y - 28);
+  }
+
   draw() {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -232,9 +335,10 @@ export class Game {
     drawMap(ctx, this.animTime);
 
     for (const lp of this.lootPoints) lp.draw(ctx);
-    for (const scav of this.scavs) if (!scav.dead) scav.draw(ctx);
+    for (const scav of this.scavs) scav.draw(ctx);
     if (this.player && !this.player.dead) this.player.draw(ctx);
     for (const b of this.bullets) b.draw(ctx);
+    this.drawInteractHint(ctx);
 
     if (this.player && this.extracting) {
       ctx.fillStyle = 'rgba(46, 204, 113, 0.85)';
@@ -262,6 +366,7 @@ export function createUI() {
   const hud = document.getElementById('hud');
   const overlay = document.getElementById('overlay');
   const endScreen = document.getElementById('end-screen');
+  const muteBtn = document.getElementById('btn-mute');
 
   return {
     showHud() {
@@ -278,6 +383,10 @@ export function createUI() {
     },
     hideEnd() {
       endScreen.classList.add('hidden');
+    },
+    updateMuteButton(muted) {
+      if (muteBtn) muteBtn.textContent = muted ? '🔇' : '🔊';
+      muteBtn?.setAttribute('aria-label', muted ? 'Включить звук' : 'Выключить звук');
     },
     showEnd(payload) {
       endScreen.classList.remove('hidden');

@@ -148,6 +148,24 @@ export function rollLoot(tier) {
   return { ...table[0], uid: `empty-${Date.now()}` };
 }
 
+export function generateScavLoot() {
+  const count = 1 + Math.floor(Math.random() * 3);
+  const items = [];
+  for (let i = 0; i < count; i++) {
+    let item = rollLoot('normal');
+    let attempts = 0;
+    while (item.id === 'empty' && attempts < 5) {
+      item = rollLoot('normal');
+      attempts++;
+    }
+    if (item.id !== 'empty') items.push(item);
+  }
+  if (items.length === 0) {
+    items.push({ id: 'coin', name: 'Монета', weight: 1, value: 1, uid: `coin-${Date.now()}` });
+  }
+  return items;
+}
+
 export function dist(ax, ay, bx, by) {
   return Math.hypot(ax - bx, ay - by);
 }
