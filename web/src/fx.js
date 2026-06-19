@@ -336,6 +336,31 @@ export class GameFx {
     });
   }
 
+  chargeStreak(x, y, angle, boss = false) {
+    const back = 12 + Math.random() * 8;
+    this.particles.push({
+      x: x - Math.cos(angle) * back,
+      y: y - Math.sin(angle) * back,
+      vx: -Math.cos(angle) * (50 + Math.random() * 30),
+      vy: -Math.sin(angle) * (50 + Math.random() * 30),
+      life: 0.22,
+      maxLife: 0.22,
+      size: boss ? 4 : 3,
+      color: boss ? 'rgba(190, 110, 255, 0.45)' : 'rgba(255, 90, 70, 0.38)',
+    });
+  }
+
+  enemyCharge(x, y, boss = false) {
+    this.rings.push({
+      x,
+      y,
+      r: 12,
+      maxR: boss ? 42 : 34,
+      life: 0.35,
+      color: boss ? 'rgba(180, 90, 255, 0.5)' : 'rgba(255, 70, 60, 0.45)',
+    });
+  }
+
   update(dt) {
     this.particles = this.particles.filter((p) => {
       p.life -= dt;

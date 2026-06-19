@@ -12,7 +12,7 @@ import {
 import { getMapList, getMapById, pickRandomMapId } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
-import { emptyBackpack, cloneBackpack, loadoutHasWeapon, cloneEquipped } from './inventory-core.js';
+import { normalizeLoadout, emptyLoadout, loadoutHasWeapon, cloneEquipped, BACKPACK_SIZE, HOTBAR_SIZE, loadoutUsed } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
 
@@ -403,23 +403,21 @@ export class Lobby {
 
   async play() {
     if (!this.profile) return;
-    const ld = this.profile.loadout || {};
-    const backpack = cloneBackpack(ld.backpack || emptyBackpack());
-    const equipped = cloneEquipped(ld.equipped || {});
-    if (!loadoutHasWeapon({ backpack, equipped })) {
+    const ld = normalizeLoadout(this.profile.loadout || {});
+    if (!loadoutHasWeapon(ld)) {
       this.flash('Надень оружие на персонажа или положи в рюкзак');
       return;
     }
     this.profile = {
       ...this.profile,
-      loadout: { backpack: emptyBackpack(), equipped: { weapon: null, armor: null } },
+      loadout: emptyLoadout(),
     };
     if (!this.auth.isGuest()) await this.persistProfile(null);
     const mapId = pickRandomMapId();
     this.selectedMap = mapId;
     this.renderMaps();
     this.renderBriefing();
-    this.callbacks.onPlay(this.selectedMode, { backpack, equipped }, mapId);
+    this.callbacks.onPlay(this.selectedMode, ld, mapId);
   }
 
   renderStash() {
@@ -532,10 +530,9 @@ export class Lobby {
   renderOperatorSlots() {
     const el = this.el.slotsLeft;
     if (!el || !this.profile) return;
-    const ld = this.profile.loadout || {};
-    const bp = ld.backpack || emptyBackpack();
+    const ld = normalizeLoadout(this.profile.loadout || {});
     const eq = ld.equipped || { weapon: null, armor: null };
-    const used = bp.filter(Boolean).length;
+    const used = loadoutUsed(ld);
 
     const equipSlot = (type, item, label) => `
       <div class="inv-slot equip-slot operator-equip-slot ${item ? 'filled' : ''}"
@@ -547,30 +544,37 @@ export class Lobby {
         ${renderInvSlotContent(item)}
       </div>`;
 
+    const slot = (zone, item, i) => `
+      <div class="inv-slot loadout-slot ${item ? 'filled' : ''}"
+           data-loadout-zone="${zone}"
+           data-loadout-idx="${i}"
+           data-drop-zone="${zone}"
+           data-slot="${i}"
+           draggable="${item ? 'true' : 'false'}"
+           title="${item ? item.name : 'Пустой слот'}">
+        <span class="slot-num">${i + 1}</span>
+        ${renderInvSlotContent(item)}
+      </div>`;
+
     el.innerHTML = `
       <p class="operator-pack-label">ЭКИПИРОВКА</p>
       <div class="operator-equip-grid">
         ${equipSlot('weapon', eq.weapon, 'ОРУЖИЕ')}
         ${equipSlot('armor', eq.armor, 'БРОНЯ')}
       </div>
-      <p class="operator-pack-label">РЮКЗАК НА РЕЙД <span>${used}/4</span></p>
-      <p class="operator-pack-hint">Из СХРОНА → рюкзак или на персонажа · по 1 шт.</p>
-      <div class="loadout-slots-grid">
-        ${bp.map((item, i) => `
-          <div class="inv-slot loadout-slot ${item ? 'filled' : ''}"
-               data-loadout-idx="${i}"
-               data-drop-zone="loadout"
-               data-slot="${i}"
-               draggable="${item ? 'true' : 'false'}"
-               title="${item ? item.name : 'Пустой слот'}">
-            <span class="slot-num">${i + 1}</span>
-            ${renderInvSlotContent(item)}
-          </div>`).join('')}
+      <p class="operator-pack-label">БЫСТРЫЙ ДОСТУП <span>${ld.hotbar.filter(Boolean).length}/${HOTBAR_SIZE}</span></p>
+      <div class="loadout-hotbar-grid">
+        ${ld.hotbar.map((item, i) => slot('hotbar', item, i)).join('')}
+      </div>
+      <p class="operator-pack-label">РЮКЗАК <span>${ld.backpack.filter(Boolean).length}/${BACKPACK_SIZE}</span></p>
+      <p class="operator-pack-hint">Из схрона → рюкзак / панель / персонаж · перетаскивание между слотами</p>
+      <div class="loadout-slots-grid loadout-slots-grid--9">
+        ${ld.backpack.map((item, i) => slot('backpack', item, i)).join('')}
       </div>
       <div class="stash-return-zone" data-drop-zone="stash" title="Перетащи предмет из рюкзака или экипировки">
         <span class="stash-return-icon">↩</span>
         <span class="stash-return-text">ВЕРНУТЬ В СХРОН</span>
-        <span class="stash-return-hint">рюкзак или экипировка · по 1 шт.</span>
+        <span class="stash-return-hint">панель, рюкзак или экипировка · по 1 шт.</span>
       </div>`;
   }
 
@@ -603,13 +607,13 @@ export class Lobby {
     if (!this.el.briefing || !this.profile) return;
     const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
-    const bp = this.profile.loadout?.backpack || emptyBackpack();
-    const eq = this.profile.loadout?.equipped || {};
-    const packItems = bp.filter(Boolean).map((i) => `${i.name}${i.count > 1 ? ` ×${i.count}` : ''}`);
+    const ld = normalizeLoadout(this.profile.loadout || {});
+    const eq = ld.equipped || {};
+    const packItems = [...ld.hotbar, ...ld.backpack].filter(Boolean).map((i) => `${i.name}${i.count > 1 ? ` ×${i.count}` : ''}`);
     const equipParts = [];
     if (eq.weapon) equipParts.push(eq.weapon.name);
     else {
-      const w = bp.find((i) => i?.weapon);
+      const w = [...ld.hotbar, ...ld.backpack].find((i) => i?.weapon);
       if (w) equipParts.push(`${w.name} (рюкзак)`);
     }
     if (eq.armor) equipParts.push(eq.armor.name);
@@ -713,7 +717,9 @@ export class Lobby {
     ctx.fillStyle = '#1a1e18';
     ctx.fillRect(w / 2 + 30, bodyY + 48, 36, 8);
 
-    if (this.profile?.loadout?.equipped?.armor || this.profile?.loadout?.backpack?.some((i) => i?.armor)) {
+    if (this.profile?.loadout?.equipped?.armor
+      || normalizeLoadout(this.profile.loadout).hotbar.some((i) => i?.armor)
+      || normalizeLoadout(this.profile.loadout).backpack.some((i) => i?.armor)) {
       ctx.strokeStyle = '#5a7a8a';
       ctx.lineWidth = 3;
       ctx.beginPath();

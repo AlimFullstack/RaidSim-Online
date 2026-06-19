@@ -12,14 +12,21 @@ import {
   generateScavLoot,
   getMapBounds,
 } from './map-core.js';
-import { getWeapon, calcSpread, getMuzzleOffset } from './weapons.js';
+import { getWeapon, calcSpread, getFireRate, getMuzzleOffset } from './weapons.js';
 import {
   emptyBackpack,
+  emptyHotbar,
   cloneEquipped,
   cloneBackpack,
+  cloneHotbar,
   BACKPACK_SIZE,
+  HOTBAR_SIZE,
   addToBackpack,
   removeFromBackpack,
+  addToLoadout,
+  normalizeLoadout,
+  findEmptyLoadoutSlot,
+  swapLoadoutSlots,
   cloneItem,
 } from './inventory-core.js';
 import {
@@ -283,9 +290,10 @@ export class Player extends Entity {
     this.fireCooldown = 0;
     this.reloadTime = 0;
     this.reloadDuration = 0;
+    this.hotbar = emptyHotbar();
     this.backpack = emptyBackpack();
     this.equipped = { weapon: null, armor: null };
-    this.maxInv = BACKPACK_SIZE;
+    this.maxInv = HOTBAR_SIZE;
     this.selectedSlot = 0;
     this.weaponAmmo = {};
     this.extractProgress = 0;
@@ -301,8 +309,10 @@ export class Player extends Entity {
   }
 
   initRaidInventory(loadout = {}) {
-    this.backpack = cloneBackpack(loadout.backpack || emptyBackpack());
-    this.equipped = cloneEquipped(loadout.equipped || {});
+    const ld = normalizeLoadout(loadout);
+    this.hotbar = cloneHotbar(ld.hotbar);
+    this.backpack = cloneBackpack(ld.backpack);
+    this.equipped = cloneEquipped(ld.equipped);
     this.weaponAmmo = {};
     this.selectedSlot = 0;
     this.armor = 0;
@@ -312,11 +322,11 @@ export class Player extends Entity {
     if (this.equipped.weapon) {
       this.equipWeapon(this.equipped.weapon.weapon);
     } else {
-      for (let i = 0; i < BACKPACK_SIZE; i++) {
-        if (this.backpack[i]?.weapon) {
-          this.equipWeaponFromBackpack(i);
-          break;
-        }
+      const fromHotbar = this.hotbar.findIndex((i) => i?.weapon);
+      if (fromHotbar >= 0) this.equipWeaponFromSlot('hotbar', fromHotbar);
+      else {
+        const fromBp = this.backpack.findIndex((i) => i?.weapon);
+        if (fromBp >= 0) this.equipWeaponFromSlot('backpack', fromBp);
       }
     }
 
@@ -324,21 +334,25 @@ export class Player extends Entity {
       this.armor = this.equipped.armor.armor || 0;
       this.maxArmor = this.armor;
     } else {
-      for (let i = 0; i < BACKPACK_SIZE; i++) {
-        if (this.backpack[i]?.armor) {
-          this.equipArmorFromBackpack(i);
-          break;
-        }
+      const fromHotbar = this.hotbar.findIndex((i) => i?.armor);
+      if (fromHotbar >= 0) this.equipArmorFromSlot('hotbar', fromHotbar);
+      else {
+        const fromBp = this.backpack.findIndex((i) => i?.armor);
+        if (fromBp >= 0) this.equipArmorFromSlot('backpack', fromBp);
       }
     }
   }
 
+  getSlotArray(zone) {
+    return zone === 'hotbar' ? this.hotbar : this.backpack;
+  }
+
   get inventory() {
-    return this.backpack;
+    return this.hotbar;
   }
 
   getSelectedItem() {
-    return this.backpack[this.selectedSlot] || null;
+    return this.hotbar[this.selectedSlot] || null;
   }
 
   canShoot() {
@@ -354,9 +368,9 @@ export class Player extends Entity {
     if (item.heal) return `Слот ${n}: ${item.name} · F лечиться · ${wName} · ЛКМ`;
     if (item.grenade) return `Слот ${n}: ${item.name} · G · ${wName} · ЛКМ`;
     if (item.smoke) return `Слот ${n}: ${item.name} · V · ${wName} · ЛКМ`;
-    if (item.armor) return `Слот ${n}: ${item.name} · надень в рюкзаке`;
+    if (item.armor) return `Слот ${n}: ${item.name} · Tab — надень на персонажа`;
     if (item.ammo) return `Слот ${n}: ${item.name} · R забирает в запас`;
-    if (item.weapon) return `Слот ${n}: ${item.name} · надень в рюкзаке`;
+    if (item.weapon) return `Слот ${n}: ${item.name} · Tab — надень на персонажа`;
     if (item.value) return `Слот ${n}: ${item.name} · ${item.value}₽ · экстракт`;
     return `Слот ${n}: ${item.name}`;
   }
@@ -372,11 +386,14 @@ export class Player extends Entity {
   }
 
   backpackFilledCount() {
-    return this.backpack.filter(Boolean).length;
+    return this.hotbar.filter(Boolean).length + this.backpack.filter(Boolean).length;
   }
 
   getCarriedLoot() {
-    const loot = this.backpack.filter(Boolean).map((i) => cloneItem(i));
+    const loot = [];
+    for (const item of [...this.hotbar, ...this.backpack]) {
+      if (item) loot.push(cloneItem(item));
+    }
     if (this.equipped.weapon) loot.push(cloneItem(this.equipped.weapon));
     if (this.equipped.armor) loot.push(cloneItem(this.equipped.armor));
     return loot;
@@ -387,43 +404,48 @@ export class Player extends Entity {
   }
 
   feedReserveFromBackpack() {
-    for (let i = 0; i < BACKPACK_SIZE; i++) {
-      const item = this.backpack[i];
-      if (!item?.ammo) continue;
-      while (item.count > 0) {
-        this.reserve += item.ammo;
-        const r = removeFromBackpack(this.backpack, i, 1);
-        if (!r.ok) break;
-        if (!this.backpack[i]?.ammo) break;
+    for (const slots of [this.hotbar, this.backpack]) {
+      for (let i = 0; i < slots.length; i++) {
+        const item = slots[i];
+        if (!item?.ammo) continue;
+        while (item.count > 0) {
+          this.reserve += item.ammo;
+          const r = removeFromBackpack(slots, i, 1);
+          if (!r.ok) break;
+          if (!slots[i]?.ammo) break;
+        }
       }
     }
   }
 
   pullAmmoFromBackpack(needed) {
     let got = 0;
-    for (let i = 0; i < BACKPACK_SIZE && got < needed; i++) {
-      const item = this.backpack[i];
-      if (!item?.ammo) continue;
-      const r = removeFromBackpack(this.backpack, i, 1);
-      if (!r.ok || !r.item) continue;
-      got += r.item.ammo || 0;
+    for (const slots of [this.hotbar, this.backpack]) {
+      for (let i = 0; i < slots.length && got < needed; i++) {
+        const item = slots[i];
+        if (!item?.ammo) continue;
+        const r = removeFromBackpack(slots, i, 1);
+        if (!r.ok || !r.item) continue;
+        got += r.item.ammo || 0;
+      }
     }
     return got;
   }
 
-  equipWeaponFromBackpack(slotIdx) {
-    const item = this.backpack[slotIdx];
+  equipWeaponFromSlot(zone, slotIdx) {
+    const slots = this.getSlotArray(zone);
+    const item = slots[slotIdx];
     if (!item?.weapon) return { ok: false, msg: 'Не оружие' };
     this.saveWeaponAmmo();
-    const old = this.equipped.weapon;
-    const removed = removeFromBackpack(this.backpack, slotIdx, 1);
+    const removed = removeFromBackpack(slots, slotIdx, 1);
     if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось взять' };
-    if (old) {
-      const added = addToBackpack(this.backpack, old, 1);
-      if (!added.ok) {
-        this.backpack[slotIdx] = removed.item;
-        return { ok: false, msg: 'Рюкзак полон — освободи место' };
+    if (this.equipped.weapon) {
+      const dest = findEmptyLoadoutSlot({ hotbar: this.hotbar, backpack: this.backpack });
+      if (!dest) {
+        slots[slotIdx] = removed.item;
+        return { ok: false, msg: 'Нет свободного слота для старого оружия' };
       }
+      this.getSlotArray(dest.zone)[dest.index] = cloneItem(this.equipped.weapon);
     }
     this.equipped.weapon = removed.item;
     this.equipWeapon(removed.item.weapon);
@@ -435,28 +457,39 @@ export class Player extends Entity {
     return { ok: true, msg: `Оружие: ${removed.item.name}` };
   }
 
-  unequipWeaponToBackpack(slotIdx) {
-    const weapon = this.equipped.weapon;
-    if (!weapon) return { ok: false, msg: 'Нет оружия' };
-    if (this.backpack[slotIdx]) return { ok: false, msg: 'Слот занят' };
-    this.saveWeaponAmmo();
-    this.backpack[slotIdx] = cloneItem(weapon);
-    this.equipped.weapon = null;
-    this.clearWeaponState();
-    return { ok: true, msg: 'Оружие в рюкзак' };
+  equipWeaponFromBackpack(slotIdx) {
+    return this.equipWeaponFromSlot('backpack', slotIdx);
   }
 
-  equipArmorFromBackpack(slotIdx) {
-    const item = this.backpack[slotIdx];
+  unequipWeaponToSlot(zone, slotIdx) {
+    const weapon = this.equipped.weapon;
+    if (!weapon) return { ok: false, msg: 'Нет оружия' };
+    const slots = this.getSlotArray(zone);
+    if (slots[slotIdx]) return { ok: false, msg: 'Слот занят' };
+    this.saveWeaponAmmo();
+    slots[slotIdx] = cloneItem(weapon);
+    this.equipped.weapon = null;
+    this.clearWeaponState();
+    return { ok: true, msg: 'Оружие снято' };
+  }
+
+  unequipWeaponToBackpack(slotIdx) {
+    return this.unequipWeaponToSlot('backpack', slotIdx);
+  }
+
+  equipArmorFromSlot(zone, slotIdx) {
+    const slots = this.getSlotArray(zone);
+    const item = slots[slotIdx];
     if (!item?.armor) return { ok: false, msg: 'Не броня' };
-    const removed = removeFromBackpack(this.backpack, slotIdx, 1);
+    const removed = removeFromBackpack(slots, slotIdx, 1);
     if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось надеть' };
     if (this.equipped.armor) {
-      const added = addToBackpack(this.backpack, this.equipped.armor, 1);
-      if (!added.ok) {
-        this.backpack[slotIdx] = removed.item;
-        return { ok: false, msg: 'Рюкзак полон' };
+      const dest = findEmptyLoadoutSlot({ hotbar: this.hotbar, backpack: this.backpack });
+      if (!dest) {
+        slots[slotIdx] = removed.item;
+        return { ok: false, msg: 'Нет свободного слота для старой брони' };
       }
+      this.getSlotArray(dest.zone)[dest.index] = cloneItem(this.equipped.armor);
       this.armor = Math.max(0, this.armor - (this.equipped.armor.armor || 0));
     }
     this.equipped.armor = removed.item;
@@ -465,15 +498,61 @@ export class Player extends Entity {
     return { ok: true, msg: `Броня +${removed.item.armor}` };
   }
 
-  unequipArmorToBackpack(slotIdx) {
+  equipArmorFromBackpack(slotIdx) {
+    return this.equipArmorFromSlot('backpack', slotIdx);
+  }
+
+  unequipArmorToSlot(zone, slotIdx) {
     const armor = this.equipped.armor;
     if (!armor) return { ok: false, msg: 'Нет брони' };
-    if (this.backpack[slotIdx]) return { ok: false, msg: 'Слот занят' };
-    this.backpack[slotIdx] = cloneItem(armor);
+    const slots = this.getSlotArray(zone);
+    if (slots[slotIdx]) return { ok: false, msg: 'Слот занят' };
+    slots[slotIdx] = cloneItem(armor);
     this.armor = Math.max(0, this.armor - (armor.armor || 0));
     this.maxArmor = this.armor;
     this.equipped.armor = null;
-    return { ok: true, msg: 'Броня в рюкзак' };
+    return { ok: true, msg: 'Броня снята' };
+  }
+
+  unequipArmorToBackpack(slotIdx) {
+    return this.unequipArmorToSlot('backpack', slotIdx);
+  }
+
+  swapInventorySlots(fromZone, fromIdx, toZone, toIdx) {
+    const r = swapLoadoutSlots(
+      { hotbar: this.hotbar, backpack: this.backpack },
+      fromZone,
+      fromIdx,
+      toZone,
+      toIdx
+    );
+    if (r.ok && r.loadout) {
+      this.hotbar = r.loadout.hotbar;
+      this.backpack = r.loadout.backpack;
+    }
+    return r;
+  }
+
+  dropEquipped(type) {
+    const item = this.equipped[type];
+    if (!item) return { ok: false, msg: 'Слот пуст' };
+    if (type === 'weapon') {
+      this.saveWeaponAmmo();
+      this.equipped.weapon = null;
+      this.clearWeaponState();
+    } else {
+      this.armor = Math.max(0, this.armor - (item.armor || 0));
+      this.maxArmor = this.armor;
+      this.equipped.armor = null;
+    }
+    return { ok: true, item: cloneItem(item), msg: `Выброшено: ${item.name}` };
+  }
+
+  dropFromSlot(zone, slotIdx) {
+    const slots = this.getSlotArray(zone);
+    const removed = removeFromBackpack(slots, slotIdx, 1);
+    if (!removed.ok || !removed.item) return { ok: false, msg: 'Слот пуст' };
+    return { ok: true, item: removed.item, msg: `Выброшено: ${removed.item.name}` };
   }
 
   useSelectedHeal() {
@@ -482,12 +561,14 @@ export class Player extends Entity {
     if (this.hp >= this.maxHp) return { ok: false, msg: 'HP полное' };
     const amount = item.heal;
     this.hp = Math.min(this.maxHp, this.hp + amount);
-    removeFromBackpack(this.backpack, this.selectedSlot, 1);
+    removeFromBackpack(this.hotbar, this.selectedSlot, 1);
     return { ok: true, msg: `+${amount} HP`, amount };
   }
 
   useSelectedArmor() {
-    return this.equipArmorFromBackpack(this.selectedSlot);
+    const item = this.getSelectedItem();
+    if (!item?.armor) return { ok: false, msg: 'Выбери слот с бронёй' };
+    return this.equipArmorFromSlot('hotbar', this.selectedSlot);
   }
 
   useSelectedSlot() {
@@ -505,14 +586,14 @@ export class Player extends Entity {
   useSelectedGrenade() {
     const item = this.getSelectedItem();
     if (!item?.grenade) return { ok: false, msg: 'Выбери слот с гранатой' };
-    removeFromBackpack(this.backpack, this.selectedSlot, 1);
+    removeFromBackpack(this.hotbar, this.selectedSlot, 1);
     return { ok: true, msg: 'Граната!' };
   }
 
   useSelectedSmoke() {
     const item = this.getSelectedItem();
     if (!item?.smoke) return { ok: false, msg: 'Выбери слот с дымовой' };
-    removeFromBackpack(this.backpack, this.selectedSlot, 1);
+    removeFromBackpack(this.hotbar, this.selectedSlot, 1);
     return { ok: true, msg: 'Дымовая завеса' };
   }
 
@@ -555,6 +636,12 @@ export class Player extends Entity {
     this.standToFire = !!w.standToFire;
   }
 
+  getEffectiveFireRate() {
+    const w = this.weaponDef || getWeapon(this.weaponId);
+    if (!w) return 0;
+    return getFireRate(w, { moving: this.isMoving, sprinting: this.isSprinting && this.isMoving });
+  }
+
   getSpreadAngle() {
     if (!this.canShoot()) return 0;
     return calcSpread(this.weaponDef || getWeapon(this.weaponId), {
@@ -584,13 +671,13 @@ export class Player extends Entity {
     this.isSprinting = (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving;
     this.isFiring = combat && this.canShoot() && input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
 
-    const baseSpeed = this.isSprinting ? 200 : 140;
-    const shootSlow = this.isFiring || this.fireCooldown > this.fireRate * 0.4;
+    const baseSpeed = this.isSprinting ? 180 : 126;
+    const shootSlow = this.isFiring || this.fireCooldown > this.getEffectiveFireRate() * 0.4;
     const reloading = this.reloadTime > 0;
     this.speed = reloading ? baseSpeed * 0.35 : shootSlow ? baseSpeed * 0.5 : baseSpeed;
 
     this.move(dx, dy, dt);
-    this.noiseLevel = this.isSprinting ? 1 : this.isMoving ? 0.4 : 0;
+    this.noiseLevel = this.isSprinting ? 1 : 0;
 
     this.recoilHeat = Math.max(0, this.recoilHeat - dt * (this.semiAuto ? 2.4 : 1.6));
     this.currentSpread = this.getSpreadAngle();
@@ -634,13 +721,8 @@ export class Player extends Entity {
     this.fireBlockedReason = '';
 
     if (combat && this.canShoot() && trigger && this.fireCooldown <= 0 && this.ammo > 0) {
-      if (w.standToFire && this.isMoving) {
-        this.fireBlockedReason = 'ПМ: остановись для выстрела';
-        return null;
-      }
-
       this.ammo -= 1;
-      this.fireCooldown = w.fireRate;
+      this.fireCooldown = this.getEffectiveFireRate();
       this.noiseLevel = 1;
       this.recoilHeat = Math.min(1, this.recoilHeat + (w.semiAuto ? 0.55 : 0.4));
 
@@ -683,17 +765,13 @@ export class Player extends Entity {
   }
 
   dropSelected() {
-    const item = this.getSelectedItem();
-    if (!item) return { ok: false, msg: 'Слот пуст' };
-    const removed = removeFromBackpack(this.backpack, this.selectedSlot, 1);
-    if (!removed.ok || !removed.item) return { ok: false, msg: 'Не удалось выбросить' };
-    return { ok: true, item: removed.item, msg: `Выброшено: ${removed.item.name}` };
+    return this.dropFromSlot('hotbar', this.selectedSlot);
   }
 
   addLoot(item) {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
-    const added = addToBackpack(this.backpack, item, item.count || 1);
-    if (!added.ok) return { ok: false, msg: 'Рюкзак полон! Выброси (Q) или разверни рюкзак' };
+    const r = addToLoadout({ hotbar: this.hotbar, backpack: this.backpack }, item, item.count || 1);
+    if (!r.ok) return { ok: false, msg: 'Рюкзак полон! Выброси (Q) или разверни рюкзак' };
     const price = item.value ? ` · ${item.value}₽` : '';
     let hint = 'Tab — рюкзак';
     if (item.weapon || item.armor) hint = 'Tab — надень на персонажа';
@@ -701,7 +779,8 @@ export class Player extends Entity {
     else if (item.grenade) hint = 'G';
     else if (item.smoke) hint = 'V';
     else if (item.ammo) hint = 'R — в запас';
-    return { ok: true, msg: `В рюкзак: ${item.name}${price} (${hint})` };
+    const where = r.zone === 'hotbar' ? 'панель' : 'рюкзак';
+    return { ok: true, msg: `В ${where}: ${item.name}${price} (${hint})` };
   }
 
   draw(ctx) {
@@ -719,7 +798,6 @@ export class Player extends Entity {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    if (this.reloadTime > 0) ctx.translate(0, 4);
 
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath();
@@ -793,6 +871,12 @@ export class Player extends Entity {
   }
 }
 
+const SCAV_BULLET_SPREAD = 0.225;
+const BOSS_BULLET_SPREAD = SCAV_BULLET_SPREAD * 0.9;
+const NPC_BURST_ROUND_DELAY = getWeapon('ak').fireRate;
+const NPC_BURST_PAUSE = 2.5;
+const SCAV_COMBAT_MIN_DIST = 200;
+
 export class Scav extends Entity {
   constructor(x, y, walls = [], opts = {}) {
     super(x, y, opts.isBoss ? 20 : 15, walls);
@@ -804,18 +888,22 @@ export class Scav extends Entity {
     this.homeY = y;
     this.wait = 0;
     this.fireCooldown = 0;
-    this.speed = this.isBoss ? 130 : 85;
-    this.vision = this.isBoss ? 420 : 360;
+    this.speed = this.isBoss ? 65 : 43;
+    this.vision = this.isBoss ? 336 : 288;
+    this.burstIndex = 0;
+    this.burstPause = 0;
+    this.burstSize = this.isBoss ? 0 : 3;
+    this.burstPauseDuration = NPC_BURST_PAUSE;
     this.name = this.isBoss ? 'Босс' : 'Scav';
-    this.hp = this.isBoss ? 400 : 100;
+    this.hp = this.isBoss ? 500 : 125;
     this.maxHp = this.hp;
     this.magSize = this.isBoss ? 24 : 12;
     this.ammo = this.magSize;
     this.reloadTime = 0;
-    this.reloadDuration = this.isBoss ? 1.1 : 1.4;
+    this.reloadDuration = this.isBoss ? 2 : 1.8;
     this.fireLock = 0;
     this.isFiring = false;
-    this.bulletDamage = this.isBoss ? 30 : 16;
+    this.bulletDamage = this.isBoss ? 16 : 14;
     this.lostSightTimer = 0;
     this.searchTimer = 0;
     this.searchLook = { x, y };
@@ -824,6 +912,9 @@ export class Scav extends Entity {
     this.searchProgress = 0;
     this.alertPos = null;
     this.spawnedByBoss = !!opts.spawnedByBoss;
+    this.chargeTimer = 0;
+    this.isCharging = false;
+    this.runSpeed = this.isBoss ? 88 : 73;
   }
 
   onDeath() {
@@ -849,30 +940,86 @@ export class Scav extends Entity {
     return true;
   }
 
-  onDamagedBy(px, py) {
-    this.state = 'attack';
-    this.alertPos = null;
-    this.lostSightTimer = 0;
-    this.angle = Math.atan2(py - this.y, px - this.x);
-    this.fireCooldown = Math.min(this.fireCooldown, 0.06);
+  onDamagedBy(px, py, player = null, smokeZones = []) {
+    const aimX = player?.x ?? px;
+    const aimY = player?.y ?? py;
+    this.angle = Math.atan2(aimY - this.y, aimX - this.x);
+    this.burstPause = 0;
+    if (player && this.canSeePlayer(player, smokeZones)) {
+      this.state = 'attack';
+      this.alertPos = null;
+      this.lostSightTimer = 0;
+      this.fireCooldown = Math.min(this.fireCooldown, 0.06);
+    } else {
+      this.state = 'investigate';
+      this.alertPos = { x: aimX, y: aimY };
+      this.lostSightTimer = 0;
+    }
+  }
+
+  chargeToward(tx, ty, dt, rate = 1) {
+    const pdx = tx - this.x;
+    const pdy = ty - this.y;
+    const len = Math.hypot(pdx, pdy);
+    if (len < 10) return false;
+    const prevSpeed = this.speed;
+    this.speed = this.runSpeed;
+    this.move(pdx, pdy, dt * rate);
+    this.speed = prevSpeed;
+    this.angle = Math.atan2(pdy, pdx);
+    this.isCharging = true;
+    return true;
+  }
+
+  attackMove(player, d, dt) {
+    if (this.reloadTime > 0 || this.fireLock > 0) return;
+    const rate = this.isBoss ? 1.15 : 0.95;
+    if (d < SCAV_COMBAT_MIN_DIST) {
+      const backX = this.x + (this.x - player.x);
+      const backY = this.y + (this.y - player.y);
+      this.chargeToward(backX, backY, dt, 0.55);
+      return;
+    }
+    if (d > SCAV_COMBAT_MIN_DIST + 20) {
+      const ringX = player.x + ((this.x - player.x) / d) * SCAV_COMBAT_MIN_DIST;
+      const ringY = player.y + ((this.y - player.y) / d) * SCAV_COMBAT_MIN_DIST;
+      this.chargeToward(ringX, ringY, dt, rate);
+    }
+  }
+
+  pickBurstSize() {
+    return this.isBoss ? 3 + Math.floor(Math.random() * 4) : 3;
+  }
+
+  pickBurstPause() {
+    return NPC_BURST_PAUSE;
   }
 
   tryShoot(player, d, dt) {
     if (this.reloadTime > 0 || this.fireLock > 0) return null;
+    if (this.burstPause > 0) return null;
     if (this.ammo <= 0) {
       this.reloadTime = this.reloadDuration;
+      this.burstIndex = 0;
       return null;
     }
     if (this.fireCooldown > 0) return null;
     if (d >= this.vision) return null;
 
+    if (this.burstIndex === 0) this.burstSize = this.pickBurstSize();
+
     this.isFiring = true;
     this.fireLock = 0.06;
     this.ammo -= 1;
-    this.fireCooldown = this.isBoss
-      ? 0.18 + Math.random() * 0.07
-      : 0.24 + Math.random() * 0.08;
-    const spread = (Math.random() - 0.5) * 0.15;
+    this.burstIndex += 1;
+    if (this.burstIndex >= this.burstSize) {
+      this.burstIndex = 0;
+      this.burstPause = this.pickBurstPause();
+      this.fireCooldown = 0;
+    } else {
+      this.fireCooldown = NPC_BURST_ROUND_DELAY;
+    }
+    const spread = (Math.random() - 0.5) * (this.isBoss ? BOSS_BULLET_SPREAD : SCAV_BULLET_SPREAD);
     return new Bullet(
       this.x + Math.cos(this.angle) * 18,
       this.y + Math.sin(this.angle) * 18,
@@ -885,22 +1032,19 @@ export class Scav extends Entity {
 
   update(dt, player, bullets, noiseEvents = [], smokeZones = []) {
     if (this.dead) return null;
-
-    for (const n of noiseEvents) {
-      if (dist(this.x, this.y, n.x, n.y) < n.radius) {
-        this.alertPos = { x: n.x, y: n.y };
-        if (this.state !== 'attack') this.state = 'investigate';
-      }
-    }
+    this.isCharging = false;
 
     if (this.reloadTime > 0) {
       this.reloadTime -= dt;
       if (this.reloadTime <= 0) this.ammo = this.magSize;
       this.isFiring = false;
+      this.burstIndex = 0;
+      this.burstPause = 0;
       return null;
     }
     if (this.fireLock > 0) this.fireLock -= dt;
     if (this.fireCooldown > 0) this.fireCooldown -= dt;
+    if (this.burstPause > 0) this.burstPause -= dt;
     if (this.fireLock <= 0) this.isFiring = false;
 
     const d = dist(this.x, this.y, player.x, player.y);
@@ -912,29 +1056,32 @@ export class Scav extends Entity {
       this.alertPos = null;
       this.lostSightTimer = 0;
     } else if (this.state === 'attack') {
-      this.lostSightTimer += dt;
-      if (this.lostSightTimer > 2.5) {
-        this.state = this.alertPos ? 'search' : 'return';
-        this.lostSightTimer = 0;
-        if (this.state === 'return') this.alertPos = null;
-      }
+      this.state = 'investigate';
+      this.alertPos = { x: player.x, y: player.y };
+      this.lostSightTimer = 0;
     }
 
-    if (this.state === 'attack') {
+    if (this.state === 'attack' && seesPlayer) {
+      this.attackMove(player, d, dt);
       this.angle = Math.atan2(player.y - this.y, player.x - this.x);
-      const canMove = this.fireLock <= 0 && !this.isFiring && this.fireCooldown <= 0;
-      if (canMove && d < 75) {
-        this.move(this.x - player.x, this.y - player.y, dt * 0.55);
-      }
       return this.tryShoot(player, d, dt);
+    }
+
+    if (this.state === 'patrol' && noiseEvents.length) {
+      for (const n of noiseEvents) {
+        if (dist(this.x, this.y, n.x, n.y) <= n.radius) {
+          this.state = 'investigate';
+          this.alertPos = { x: n.x, y: n.y };
+          break;
+        }
+      }
     }
 
     if (this.state === 'investigate' && this.alertPos) {
       const pdx = this.alertPos.x - this.x;
       const pdy = this.alertPos.y - this.y;
       if (Math.hypot(pdx, pdy) > 24) {
-        this.move(pdx, pdy, dt * 0.75);
-        this.angle = Math.atan2(pdy, pdx);
+        this.chargeToward(this.alertPos.x, this.alertPos.y, dt, 0.85);
       } else {
         this.state = 'search';
         this.searchTimer = 3 + Math.random() * 2;
@@ -948,8 +1095,7 @@ export class Scav extends Entity {
       const sdx = this.searchLook.x - this.x;
       const sdy = this.searchLook.y - this.y;
       if (Math.hypot(sdx, sdy) > 12) {
-        this.move(sdx, sdy, dt * 0.5);
-        this.angle = Math.atan2(sdy, sdx);
+        this.chargeToward(this.searchLook.x, this.searchLook.y, dt, 0.6);
       } else if (Math.random() < dt * 0.35) {
         this.searchLook = {
           x: this.x + (Math.random() - 0.5) * 80,
@@ -967,25 +1113,31 @@ export class Scav extends Entity {
       const pdx = this.homeX - this.x;
       const pdy = this.homeY - this.y;
       if (Math.hypot(pdx, pdy) > 20) {
-        this.move(pdx, pdy, dt * 0.6);
-        this.angle = Math.atan2(pdy, pdx);
+        this.chargeToward(this.homeX, this.homeY, dt, 0.6);
       } else {
         this.state = 'patrol';
-        this.wait = 1 + Math.random();
+        this.wait = 0.4 + Math.random() * 0.6;
       }
       return null;
     }
 
     this.state = 'patrol';
     this.wait -= dt;
-    if (this.wait <= 0) this.pickPatrol();
     const pdx = this.targetX - this.x;
     const pdy = this.targetY - this.y;
-    if (Math.hypot(pdx, pdy) > 12) {
-      this.move(pdx, pdy, dt * 0.55);
-      this.angle = Math.atan2(pdy, pdx);
-    } else {
-      this.angle = Math.random() * Math.PI * 2;
+    if (this.wait <= 0 || Math.hypot(pdx, pdy) <= 14) {
+      if (this.wait <= 0) this.pickPatrol();
+      else this.wait = 0.2;
+    }
+    const ndx = this.targetX - this.x;
+    const ndy = this.targetY - this.y;
+    if (Math.hypot(ndx, ndy) > 10) {
+      const prevSpeed = this.speed;
+      this.speed = this.isBoss ? 55 : 48;
+      this.move(ndx, ndy, dt * 0.65);
+      this.speed = prevSpeed;
+      this.angle = Math.atan2(ndy, ndx);
+      this.isCharging = false;
     }
     return null;
   }
@@ -996,13 +1148,17 @@ export class Scav extends Entity {
       return;
     }
 
-    if (this.reloadTime > 0) {
+    if (this.reloadTime > 0 && this.reloadDuration > 0) {
       const prog = 1 - this.reloadTime / this.reloadDuration;
-      ctx.strokeStyle = 'rgba(255, 200, 60, 0.85)';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(46, 204, 113, 0.9)';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(this.x, this.y, this.r + 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
+      ctx.arc(this.x, this.y, this.r + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
       ctx.stroke();
+      ctx.fillStyle = 'rgba(46, 204, 113, 0.95)';
+      ctx.font = '10px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText(`↻ ${Math.ceil(prog * 100)}%`, this.x, this.y - this.r - 14);
     }
 
     ctx.save();
@@ -1023,6 +1179,14 @@ export class Scav extends Entity {
     ctx.fillRect(7, -3, 16, 6);
 
     ctx.restore();
+
+    if (this.isCharging) {
+      ctx.strokeStyle = this.isBoss ? 'rgba(190, 110, 255, 0.5)' : 'rgba(255, 80, 60, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r + 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     if (!this.dead && (this.state === 'attack' || this.state === 'search')) {
       ctx.fillStyle = this.state === 'search' ? '#f5e6a8' : '#ff6b6b';

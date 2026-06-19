@@ -10,6 +10,7 @@ import {
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import { firebaseConfig, isFirebaseConfigured } from './firebase-config.js';
 import { createDefaultProfile, ensureMigratedProfile } from './profile.js';
+import { normalizeLoadout } from './inventory-core.js';
 import { normalizeQuestRef } from './quests.js';
 
 let app = null;
@@ -60,10 +61,7 @@ export function serializeProfile(profile) {
       completed: profile.quests?.completed || [],
       active: normalizeQuestRef(profile.quests?.active),
     },
-    loadout: {
-      backpack: profile.loadout?.backpack || [null, null, null, null],
-      equipped: profile.loadout?.equipped || { weapon: null, armor: null },
-    },
+    loadout: normalizeLoadout(profile.loadout || {}),
   });
   return data;
 }

@@ -1,12 +1,14 @@
 import { evaluateQuest, applyQuestReward, pickRandomQuest } from './quests.js';
 import {
   addToStash,
+  emptyLoadout,
   emptyBackpack,
-  emptyEquipped,
+  emptyHotbar,
   cloneEquipped,
   stackItems,
   lootTotalValue,
   ensureMigratedProfile,
+  normalizeLoadout,
 } from './inventory-core.js';
 
 export const RAID_MODES = {
@@ -47,7 +49,7 @@ export function createDefaultProfile(overrides = {}) {
     xp: 0,
     rubles: 20,
     stash: { items: [] },
-    loadout: { backpack: emptyBackpack(), equipped: emptyEquipped() },
+    loadout: emptyLoadout(),
     stats: { raids: 0, extracts: 0, kills: 0, totalLootValue: 0 },
     quests: { active: null, completed: [] },
     hideout: { level: 1 },
@@ -59,7 +61,7 @@ export function applyRaidResult(profile, result) {
   let p = ensureMigratedProfile({
     ...profile,
     stash: { items: [...profile.stash.items] },
-    loadout: { backpack: [...(profile.loadout?.backpack || emptyBackpack())], equipped: cloneEquipped(profile.loadout?.equipped || {}) },
+    loadout: normalizeLoadout(profile.loadout),
     stats: { ...profile.stats },
     quests: { ...profile.quests },
   });
@@ -119,4 +121,4 @@ export function sellStashItem(profile, index) {
   return { ok: true, profile: p, msg: `Продано: ${item.name}${item.count > 1 ? ` ×${item.count}` : ''}` };
 }
 
-export { ensureMigratedProfile, lootTotalValue, stackItems, emptyBackpack };
+export { ensureMigratedProfile, lootTotalValue, stackItems, emptyLoadout, emptyBackpack, emptyHotbar };

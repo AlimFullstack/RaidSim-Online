@@ -275,6 +275,17 @@ body:has(.lobby-screen:not(.hidden)) #app {
   gap: 6px;
 }
 
+.loadout-slots-grid--9 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.loadout-hotbar-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 .operator-pack-label {
   margin: 0 0 4px;
   font-size: 11px;

@@ -856,6 +856,23 @@ body {
   gap: 8px;
 }
 
+.inv-backpack-grid--9 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.inv-hotbar-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.inv-footer-note {
+  margin: 10px 0 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+
 .inv-slot {
   position: relative;
   min-height: 72px;

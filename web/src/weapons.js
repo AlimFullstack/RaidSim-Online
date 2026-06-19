@@ -1,6 +1,9 @@
-/** Базовый разброс при ходьбе ≈ полуугол фонарика (попасть почти нереально) */
+/** Базовый разброс при ходьбе */
 const WALK_SPREAD = 0.62;
 const SPRINT_SPREAD = 0.78;
+const STANDING_ACCURACY_MULT = 0.6;
+const WALKING_MOVE_SPREAD_MULT = 0.6;
+const STANDING_FIRE_RATE_MULT = 1 / 1.05;
 
 export const WEAPONS = {
   pm: {
@@ -15,7 +18,7 @@ export const WEAPONS = {
     pellets: 1,
     range: 9999,
     semiAuto: true,
-    standToFire: true,
+    standToFire: false,
     bulletSpeed: 760,
     bulletSize: 2.5,
     recoilKick: 5,
@@ -93,10 +96,20 @@ export function getWeapon(id) {
 /** Total spread angle (radians) from weapon + movement + recoil */
 export function calcSpread(weapon, { moving, sprinting, recoilHeat = 0 }) {
   let s = weapon.spread || 0;
-  if (moving) s += weapon.moveSpread || WALK_SPREAD;
-  if (sprinting) s += weapon.sprintSpread || SPRINT_SPREAD;
+  if (!moving && !sprinting) {
+    s *= STANDING_ACCURACY_MULT;
+  } else {
+    if (moving) s += (weapon.moveSpread || WALK_SPREAD) * WALKING_MOVE_SPREAD_MULT;
+    if (sprinting) s += weapon.sprintSpread || SPRINT_SPREAD;
+  }
   s += recoilHeat * (weapon.semiAuto ? 0.04 : 0.03);
   return s;
+}
+
+/** Cooldown between shots; standing player shoots ~5% faster */
+export function getFireRate(weapon, { moving = false, sprinting = false } = {}) {
+  const rate = weapon.fireRate || 0;
+  return moving || sprinting ? rate : rate * STANDING_FIRE_RATE_MULT;
 }
 
 export function getMuzzleOffset(weaponId) {

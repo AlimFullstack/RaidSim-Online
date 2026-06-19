@@ -1,15 +1,19 @@
 import { dist, circleRectCollision } from './map-core.js';
 
-/** @param {import('./entities.js').Scav[]} scavs */
-export function alertNearbyScavs(scavs, x, y, radius, alertX, alertY) {
+/** @param {import('./entities.js').Scav[]} scavs @param {import('./entities.js').Player} [player] @param {import('./entities.js').SmokeZone[]} [smokeZones] */
+export function alertNearbyScavs(scavs, x, y, radius, alertX, alertY, player = null, smokeZones = []) {
   for (const s of scavs) {
     if (s.dead) continue;
-    if (dist(s.x, s.y, x, y) <= radius) {
+    if (dist(s.x, s.y, x, y) > radius) continue;
+    if (player && s.canSeePlayer(player, smokeZones)) {
+      s.state = 'attack';
+      s.alertPos = null;
+      s.lostSightTimer = 0;
+      s.fireCooldown = Math.min(s.fireCooldown ?? 0, 0.1);
+    } else if (s.state === 'patrol' || s.state === 'investigate' || s.state === 'search') {
+      s.state = 'investigate';
       s.alertPos = { x: alertX, y: alertY };
-        if (s.state !== 'attack') {
-          s.state = 'investigate';
-          s.fireCooldown = Math.min(s.fireCooldown ?? 0, 0.15);
-        }
+      s.lostSightTimer = 0;
     }
   }
 }

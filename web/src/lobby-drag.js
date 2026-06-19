@@ -8,6 +8,8 @@ import {
   lobbyUnequipWeapon,
   lobbyUnequipArmor,
   lobbyEquipToStash,
+  swapLoadoutSlots,
+  normalizeLoadout,
 } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 
@@ -26,25 +28,32 @@ export function setupLobbyDrag(lobby) {
     }
   };
 
+  const zoneInfo = (zone) => {
+    if (zone.dataset.dropZone === 'hotbar') return { zone: 'hotbar', slot: Number(zone.dataset.slot) };
+    if (zone.dataset.dropZone === 'backpack') return { zone: 'backpack', slot: Number(zone.dataset.slot) };
+    return null;
+  };
+
   document.addEventListener('dragstart', (e) => {
     if (e.target.closest('.sell-btn')) {
       e.preventDefault();
       return;
     }
     const stashEl = e.target.closest('[data-stash-idx]');
-    const loadoutEl = e.target.closest('[data-loadout-idx]');
+    const loadoutEl = e.target.closest('[data-loadout-zone]');
     const equipEl = e.target.closest('.operator-equip-slot[data-equip-type]');
 
     if (stashEl) {
       dragPayload = { source: 'stash', index: Number(stashEl.dataset.stashIdx) };
-    } else if (loadoutEl && loadoutEl.dataset.loadoutIdx !== undefined) {
+    } else if (loadoutEl) {
+      const zone = loadoutEl.dataset.loadoutZone;
       const idx = Number(loadoutEl.dataset.loadoutIdx);
-      const item = lobby.profile?.loadout?.backpack?.[idx];
+      const item = lobby.profile?.loadout?.[zone]?.[idx];
       if (!item) {
         e.preventDefault();
         return;
       }
-      dragPayload = { source: 'loadout', index: idx };
+      dragPayload = { source: 'loadout', zone, index: idx };
     } else if (equipEl) {
       const type = equipEl.dataset.equipType;
       const item = lobby.profile?.loadout?.equipped?.[type];
@@ -95,32 +104,36 @@ export function setupLobbyDrag(lobby) {
 
     const zoneType = zone.dataset.dropZone;
     let r = { ok: false, msg: 'Нельзя переместить' };
+    const slotInfo = zoneInfo(zone);
 
-    if (payload.source === 'stash' && zoneType === 'loadout') {
-      r = moveStashToLoadout(lobby.profile, payload.index, Number(zone.dataset.slot), 1);
+    if (payload.source === 'stash' && (zoneType === 'hotbar' || zoneType === 'backpack')) {
+      r = moveStashToLoadout(lobby.profile, payload.index, zoneType, slotInfo.slot, 1);
     } else if (payload.source === 'stash' && zoneType === 'equip-weapon') {
       r = lobbyEquipWeaponFromStash(lobby.profile, payload.index);
     } else if (payload.source === 'stash' && zoneType === 'equip-armor') {
       r = lobbyEquipArmorFromStash(lobby.profile, payload.index);
     } else if (payload.source === 'loadout' && zoneType === 'stash') {
-      r = moveLoadoutToStash(lobby.profile, payload.index, 1);
-    } else if (payload.source === 'loadout' && zoneType === 'loadout') {
-      const toSlot = Number(zone.dataset.slot);
-      if (toSlot !== payload.index) {
-        const bp = lobby.profile.loadout.backpack;
-        const tmp = bp[toSlot];
-        bp[toSlot] = bp[payload.index];
-        bp[payload.index] = tmp;
-        r = { ok: true, profile: lobby.profile, msg: 'Перемещено' };
+      r = moveLoadoutToStash(lobby.profile, payload.zone, payload.index, 1);
+    } else if (payload.source === 'loadout' && (zoneType === 'hotbar' || zoneType === 'backpack')) {
+      if (payload.zone === zoneType && slotInfo.slot === payload.index) {
+        r = { ok: false, msg: 'Тот же слот' };
+      } else {
+        const ld = normalizeLoadout(lobby.profile.loadout);
+        const swap = swapLoadoutSlots(ld, payload.zone, payload.index, zoneType, slotInfo.slot);
+        if (swap.ok) {
+          lobby.profile.loadout = swap.loadout;
+          r = { ok: true, profile: lobby.profile, msg: swap.msg };
+        } else {
+          r = swap;
+        }
       }
     } else if (payload.source === 'loadout' && zoneType === 'equip-weapon') {
-      r = lobbyEquipWeapon(lobby.profile, payload.index);
+      r = lobbyEquipWeapon(lobby.profile, payload.zone, payload.index);
     } else if (payload.source === 'loadout' && zoneType === 'equip-armor') {
-      r = lobbyEquipArmor(lobby.profile, payload.index);
-    } else if (payload.source === 'equip' && zoneType === 'loadout') {
-      const slot = Number(zone.dataset.slot);
-      if (payload.type === 'weapon') r = lobbyUnequipWeapon(lobby.profile, slot);
-      else if (payload.type === 'armor') r = lobbyUnequipArmor(lobby.profile, slot);
+      r = lobbyEquipArmor(lobby.profile, payload.zone, payload.index);
+    } else if (payload.source === 'equip' && (zoneType === 'hotbar' || zoneType === 'backpack')) {
+      if (payload.type === 'weapon') r = lobbyUnequipWeapon(lobby.profile, zoneType, slotInfo.slot);
+      else if (payload.type === 'armor') r = lobbyUnequipArmor(lobby.profile, zoneType, slotInfo.slot);
     } else if (payload.source === 'equip' && zoneType === 'stash') {
       r = lobbyEquipToStash(lobby.profile, payload.type);
     }

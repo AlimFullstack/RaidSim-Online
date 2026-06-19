@@ -4,14 +4,19 @@ import {
   itemsMatch,
   addToStash,
   addToBackpack,
+  addToLoadout,
   removeFromStash,
   moveStashToLoadout,
   moveLoadoutToStash,
   stackItems,
   migrateProfile,
   emptyBackpack,
+  emptyHotbar,
+  emptyLoadout,
+  normalizeLoadout,
   STASH_MAX_STACKS,
   BACKPACK_SIZE,
+  HOTBAR_SIZE,
 } from '../src/inventory-core.js';
 
 describe('inventory-core', () => {
@@ -32,26 +37,46 @@ describe('inventory-core', () => {
     expect(stash.items).toHaveLength(2);
   });
 
-  it('moveStashToLoadout takes 1 from stack', () => {
+  it('moveStashToLoadout takes 1 from stack into backpack', () => {
     const profile = {
       stash: { items: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 3 }] },
-      loadout: { backpack: emptyBackpack() },
+      loadout: emptyLoadout(),
     };
-    const r = moveStashToLoadout(profile, 0, 0, 1);
+    const r = moveStashToLoadout(profile, 0, 'backpack', 0, 1);
     expect(r.ok).toBe(true);
     expect(r.profile.stash.items[0].count).toBe(2);
     expect(r.profile.loadout.backpack[0].count).toBe(1);
   });
 
+  it('moveStashToLoadout can target hotbar', () => {
+    const profile = {
+      stash: { items: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 1 }] },
+      loadout: emptyLoadout(),
+    };
+    const r = moveStashToLoadout(profile, 0, 'hotbar', 1, 1);
+    expect(r.ok).toBe(true);
+    expect(r.profile.loadout.hotbar[1].name).toBe('Аптечка');
+  });
+
   it('backpack overflow blocks add', () => {
     const slots = emptyBackpack();
-    addToBackpack(slots, { id: 'coin', name: 'Монета', value: 1 });
-    addToBackpack(slots, { id: 'food', name: 'Еда', value: 1 });
-    addToBackpack(slots, { id: 'bolt', name: 'Болт', value: 2 });
-    addToBackpack(slots, { id: 'chain', name: 'Цепь', value: 5 });
+    for (let i = 0; i < BACKPACK_SIZE; i++) {
+      addToBackpack(slots, { id: `item${i}`, name: `Item ${i}`, value: 1 });
+    }
     const r = addToBackpack(slots, { id: 'key', name: 'Ключ', value: 6 });
     expect(r.ok).toBe(false);
     expect(slots.filter(Boolean)).toHaveLength(BACKPACK_SIZE);
+  });
+
+  it('addToLoadout fills backpack then hotbar', () => {
+    const loadout = emptyLoadout();
+    for (let i = 0; i < BACKPACK_SIZE; i++) {
+      addToLoadout(loadout, { id: `bp${i}`, name: `B${i}`, value: 1 });
+    }
+    const r = addToLoadout(loadout, { id: 'hb', name: 'Hot', value: 1 });
+    expect(r.ok).toBe(true);
+    expect(r.zone).toBe('hotbar');
+    expect(loadout.hotbar.some((i) => i?.id === 'hb')).toBe(true);
   });
 
   it('stash max stacks', () => {
@@ -66,9 +91,13 @@ describe('inventory-core', () => {
   it('moveLoadoutToStash merges stacks', () => {
     const profile = {
       stash: { items: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 2 }] },
-      loadout: { backpack: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 1 }, null, null, null] },
+      loadout: {
+        hotbar: emptyHotbar(),
+        backpack: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 1 }, ...emptyBackpack().slice(1)],
+        equipped: { weapon: null, armor: null },
+      },
     };
-    const r = moveLoadoutToStash(profile, 0, 1);
+    const r = moveLoadoutToStash(profile, 'backpack', 0, 1);
     expect(r.ok).toBe(true);
     expect(r.profile.stash.items[0].count).toBe(3);
     expect(r.profile.loadout.backpack[0]).toBeNull();
@@ -80,9 +109,19 @@ describe('inventory-core', () => {
       loadout: { weapon: 'ak', extraMedkits: 2, extraAmmo: 12, startArmor: 25 },
     };
     const p = migrateProfile(old);
-    expect(p.loadout.backpack.filter(Boolean).length).toBeGreaterThan(0);
+    expect(p.loadout.backpack.filter(Boolean).length + p.loadout.hotbar.filter(Boolean).length).toBeGreaterThan(0);
     expect(p.stash.items.find((i) => i.id === 'coin')).toBeTruthy();
     expect(p.loadout.weapon).toBeUndefined();
+  });
+
+  it('normalizeLoadout upgrades old 4-slot backpack', () => {
+    const ld = normalizeLoadout({
+      backpack: [{ id: 'ak', name: 'АК', weapon: 'ak' }, null, null, null],
+      equipped: { weapon: null, armor: null },
+    });
+    expect(ld.backpack).toHaveLength(BACKPACK_SIZE);
+    expect(ld.hotbar).toHaveLength(HOTBAR_SIZE);
+    expect(ld.backpack[0].weapon).toBe('ak');
   });
 
   it('stackItems groups flat stash', () => {

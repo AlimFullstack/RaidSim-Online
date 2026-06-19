@@ -18,6 +18,7 @@ import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
+import { HOTBAR_SIZE } from './inventory-core.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
@@ -330,6 +331,11 @@ export class Game {
         this.scavAlerted.add(scav);
         this.audio?.play('alert');
         this.fx.floatText(scav.x, scav.y - 28, '!', '#ff6b6b');
+        this.fx.enemyCharge(scav.x, scav.y, scav.isBoss);
+      }
+      if (scav.isCharging && !scav.dead) {
+        if (Math.random() < 0.32) this.fx.footDust(scav.x, scav.y);
+        if (Math.random() < 0.14) this.fx.chargeStreak(scav.x, scav.y, scav.angle, scav.isBoss);
       }
       if (b) {
         this.bullets.push(b);
@@ -597,13 +603,13 @@ export class Game {
           if (dist(b.x, b.y, scav.x, scav.y) < scav.r + b.r) {
             const wasAlive = !scav.dead;
             scav.takeDamage(b.damage);
-            if (wasAlive) scav.onDamagedBy(p.x, p.y);
+            if (wasAlive) scav.onDamagedBy(p.x, p.y, p, this.smokeZones);
             b.dead = true;
             this.fx.hitSparks(b.x, b.y);
             this.audio?.play('hit');
             if (wasAlive) {
               const alertR = scav.isBoss ? 600 : 450;
-              alertNearbyScavs(this.scavs, scav.x, scav.y, alertR, p.x, p.y);
+              alertNearbyScavs(this.scavs, scav.x, scav.y, alertR, p.x, p.y, p, this.smokeZones);
             }
             if (scav.dead) {
               if (!scav.loot?.length) scav.onDeath();
@@ -801,7 +807,8 @@ export function createUI() {
   const muteBtn = document.getElementById('btn-mute');
 
   function invCacheKey(p) {
-    return `${p.backpackFilledCount()}|${p.selectedSlot}|${p.canShoot() ? p.weaponId : '-'}|${p.backpack.map((i) => i?.uid || i?.id || '-').join(',')}`;
+    const hb = p.hotbar.map((i) => i?.uid || i?.id || '-').join(',');
+    return `${p.backpackFilledCount()}|${p.selectedSlot}|${p.canShoot() ? p.weaponId : '-'}|${hb}`;
   }
 
   return {
@@ -884,7 +891,7 @@ export function createUI() {
         if (reloading) {
           weaponHint.textContent = `Перезарядка… ${Math.ceil((1 - p.reloadTime / p.reloadDuration) * 100)}%`;
         } else if (p.canShoot() && p.weaponId === 'pm') {
-          weaponHint.textContent = 'Полуавто · стой для выстрела';
+          weaponHint.textContent = 'Полуавто · клик';
         } else if (p.canShoot() && p.semiAuto) {
           weaponHint.textContent = 'Полуавто · клик';
         } else if (p.canShoot()) {
@@ -895,7 +902,7 @@ export function createUI() {
       }
       const hintEl = document.getElementById('active-slot-hint');
       if (hintEl) hintEl.textContent = p.getSlotActionHint();
-      document.getElementById('inv-count').textContent = `${p.backpackFilledCount()}/${p.maxInv}`;
+      document.getElementById('inv-count').textContent = `${p.hotbar.filter(Boolean).length}/${HOTBAR_SIZE}`;
       const armorEl = document.getElementById('armor-bar');
       const armorText = document.getElementById('armor-text');
       if (armorEl) armorEl.style.width = `${p.maxArmor > 0 ? (p.armor / p.maxArmor) * 100 : 0}%`;
@@ -906,8 +913,8 @@ export function createUI() {
         game._hudCache = key;
         const slots = document.getElementById('inv-slots');
         slots.innerHTML = '';
-        for (let i = 0; i < p.maxInv; i++) {
-          const item = p.backpack[i];
+        for (let i = 0; i < HOTBAR_SIZE; i++) {
+          const item = p.hotbar[i];
           const div = document.createElement('div');
           div.className = 'slot' + (item ? ' filled' : '') + (i === p.selectedSlot ? ' selected' : '');
           div.dataset.idx = String(i);
@@ -915,7 +922,7 @@ export function createUI() {
           div.innerHTML = item
             ? `<span class="slot-num">${i + 1}</span><span class="slot-ico">${itemIcon(item)}</span><span class="slot-name">${item.name.slice(0, 6)}${countBadge}</span>`
             : `<span class="slot-num">${i + 1}</span><span class="slot-ico">·</span><span class="slot-name">—</span>`;
-          div.title = item ? slotItemHint(item) : 'Пустой слот';
+          div.title = item ? slotItemHint(item, { hotbar: true }) : 'Пустой слот';
           div.addEventListener('click', () => {
             p.selectSlot(i);
             game._hudCache = '';
