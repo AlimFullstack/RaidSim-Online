@@ -96,6 +96,9 @@ export class Matchmaking {
       const data = snap.data();
       if (!data?.matchId) return;
       this.forming = false;
+      if (this.queueKey) {
+        deleteDoc(doc(this.db, 'matchQueues', this.queueKey, 'waiting', this.uid)).catch(() => {});
+      }
       this.cleanupQueueOnly();
       this.onReady?.({
         matchId: data.matchId,

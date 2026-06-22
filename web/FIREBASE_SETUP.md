@@ -27,18 +27,9 @@
 - Режим: **production** (правила уже в репозитории)
 - Регион: `europe-west` или ближайший
 
-Затем **Rules** → вставь из `firestore.rules` или:
+Затем **Rules** → вставь содержимое файла `firestore.rules` из репозитория (включая `matchQueues`, `playerMatches`, `matches`).
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-  }
-}
-```
+> **Мультиплеер:** если видишь «Нет доступа к очереди» — в консоли всё ещё старые правила (только `users`). Обнови Rules и нажми **Publish**.
 
 ### 4. (Опционально) Задеплоить правила через CLI
 
