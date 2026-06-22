@@ -7,13 +7,14 @@ import {
   runTransaction,
   getDocs,
 } from 'firebase/firestore';
+import { pickRandomMapId } from './map-loader.js';
 
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 4;
-export const FILL_WAIT_MS = 12000;
+export const FILL_WAIT_MS = 30000;
 
-export function queueDocId(mapId, mode) {
-  return `${mapId}_${mode}`;
+export function queueDocId(mode) {
+  return `mm_${mode}`;
 }
 
 export function sortQueuePlayers(players) {
@@ -38,6 +39,19 @@ export function shouldFormMatch(players, fillDeadline, now = Date.now()) {
   return fillDeadline > 0 && now >= fillDeadline;
 }
 
+export function countdownSeconds(fillDeadline, now = Date.now()) {
+  if (!fillDeadline || fillDeadline <= now) return 0;
+  return Math.ceil((fillDeadline - now) / 1000);
+}
+
+export function getMatchmakingPhase(players, fillDeadline, now = Date.now()) {
+  if (players.length < MIN_PLAYERS) return 'searching';
+  if (players.length >= MAX_PLAYERS) return 'full';
+  if (fillDeadline > now) return 'countdown';
+  if (fillDeadline > 0) return 'starting';
+  return 'waiting';
+}
+
 export class Matchmaking {
   /**
    * @param {import('firebase/firestore').Firestore} db
@@ -48,12 +62,14 @@ export class Matchmaking {
     this.uid = identity.uid;
     this.displayName = identity.displayName;
     this.queueKey = null;
-    this.mapId = null;
     this.mode = null;
     this.unsubQueue = null;
     this.unsubAssignment = null;
+    this.unsubMeta = null;
     this.fillTimer = null;
+    this.tickTimer = null;
     this.fillDeadline = 0;
+    this.lastPlayers = [];
     this.forming = false;
     this.cancelled = false;
     this.onStatus = null;
@@ -61,17 +77,15 @@ export class Matchmaking {
     this.onError = null;
   }
 
-  async search(mapId, mode) {
+  async search(mode) {
     this.cancelled = false;
-    this.mapId = mapId;
     this.mode = mode;
-    this.queueKey = queueDocId(mapId, mode);
+    this.queueKey = queueDocId(mode);
 
     const waitingRef = doc(this.db, 'matchQueues', this.queueKey, 'waiting', this.uid);
     await setDoc(waitingRef, {
       uid: this.uid,
       displayName: this.displayName,
-      mapId,
       mode,
       joinedAt: Date.now(),
     });
@@ -90,39 +104,101 @@ export class Matchmaking {
     });
 
     const waitingCol = collection(this.db, 'matchQueues', this.queueKey, 'waiting');
+    const metaRef = doc(this.db, 'matchQueues', this.queueKey, 'meta', 'state');
+
+    this.unsubMeta = onSnapshot(metaRef, (snap) => {
+      if (this.cancelled) return;
+      const deadline = snap.data()?.fillDeadline || 0;
+      if (deadline) this.fillDeadline = deadline;
+      else if (this.lastPlayers.length < MIN_PLAYERS) this.fillDeadline = 0;
+      if (this.lastPlayers.length) this.emitStatus(this.lastPlayers);
+    });
+
     this.unsubQueue = onSnapshot(waitingCol, (snap) => {
       if (this.cancelled) return;
       const players = snap.docs.map((d) => d.data());
       this.emitStatus(players);
 
       if (players.length >= MIN_PLAYERS && isQueueLeader(players, this.uid)) {
-        this.scheduleFill(players);
+        void this.scheduleFill(players);
       } else if (players.length < MIN_PLAYERS) {
         this.clearFillTimer();
         this.fillDeadline = 0;
+        if (isQueueLeader(players, this.uid)) {
+          deleteDoc(metaRef).catch(() => {});
+        }
       }
+    });
+
+    this.startCountdownTick();
+  }
+
+  startCountdownTick() {
+    this.clearCountdownTick();
+    this.tickTimer = setInterval(() => {
+      if (this.cancelled || !this.fillDeadline || this.lastPlayers.length < MIN_PLAYERS) return;
+      this.emitStatus(this.lastPlayers);
+      if (
+        isQueueLeader(this.lastPlayers, this.uid) &&
+        shouldFormMatch(this.lastPlayers, this.fillDeadline)
+      ) {
+        void this.tryFormMatch(this.lastPlayers);
+      }
+    }, 1000);
+  }
+
+  clearCountdownTick() {
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+  }
+
+  async ensureFillDeadline() {
+    const metaRef = doc(this.db, 'matchQueues', this.queueKey, 'meta', 'state');
+    await runTransaction(this.db, async (tx) => {
+      const snap = await tx.get(metaRef);
+      if (snap.exists() && snap.data().fillDeadline) {
+        this.fillDeadline = snap.data().fillDeadline;
+        return;
+      }
+      const deadline = Date.now() + FILL_WAIT_MS;
+      tx.set(metaRef, { fillDeadline: deadline, setAt: Date.now() });
+      this.fillDeadline = deadline;
     });
   }
 
+  async clearFillDeadlineMeta() {
+    try {
+      await deleteDoc(doc(this.db, 'matchQueues', this.queueKey, 'meta', 'state'));
+    } catch {
+      /* ignore */
+    }
+    this.fillDeadline = 0;
+  }
+
   emitStatus(players) {
+    this.lastPlayers = players;
+    const phase = getMatchmakingPhase(players, this.fillDeadline);
     this.onStatus?.({
-      phase: 'searching',
+      phase,
       count: players.length,
       min: MIN_PLAYERS,
       max: MAX_PLAYERS,
       players: sortQueuePlayers(players),
       fillDeadline: this.fillDeadline || null,
+      countdownSec: countdownSeconds(this.fillDeadline),
     });
   }
 
-  scheduleFill(players) {
+  async scheduleFill(players) {
     if (!this.fillDeadline) {
-      this.fillDeadline = Date.now() + FILL_WAIT_MS;
+      await this.ensureFillDeadline();
       this.emitStatus(players);
     }
 
     if (shouldFormMatch(players, this.fillDeadline)) {
-      this.tryFormMatch(players);
+      await this.tryFormMatch(players);
       return;
     }
 
@@ -135,7 +211,7 @@ export class Matchmaking {
           .then((snap) => {
             const fresh = snap.docs.map((d) => d.data());
             if (isQueueLeader(fresh, this.uid) && shouldFormMatch(fresh, this.fillDeadline)) {
-              this.tryFormMatch(fresh);
+              void this.tryFormMatch(fresh);
             }
           })
           .catch((e) => this.onError?.(e));
@@ -153,11 +229,7 @@ export class Matchmaking {
 
     try {
       const matchId = crypto.randomUUID();
-      const matchPlayers = picked.map((p, i) => ({
-        uid: p.uid,
-        displayName: p.displayName || 'Оператор',
-        slot: i,
-      }));
+      const mapId = pickRandomMapId();
 
       await runTransaction(this.db, async (tx) => {
         const verified = [];
@@ -180,7 +252,7 @@ export class Matchmaking {
         const matchRef = doc(this.db, 'matches', matchId);
         tx.set(matchRef, {
           matchId,
-          mapId: this.mapId,
+          mapId,
           mode: this.mode,
           players: finalPlayers,
           status: 'starting',
@@ -190,13 +262,14 @@ export class Matchmaking {
         for (const p of finalPlayers) {
           tx.set(doc(this.db, 'playerMatches', p.uid), {
             matchId,
-            mapId: this.mapId,
+            mapId,
             mode: this.mode,
             players: finalPlayers,
             at: Date.now(),
           });
           tx.delete(doc(this.db, 'matchQueues', this.queueKey, 'waiting', p.uid));
         }
+        tx.delete(doc(this.db, 'matchQueues', this.queueKey, 'meta', 'state'));
       });
     } catch (e) {
       this.forming = false;
@@ -213,17 +286,23 @@ export class Matchmaking {
 
   cleanupQueueOnly() {
     this.clearFillTimer();
+    this.clearCountdownTick();
     this.unsubQueue?.();
+    this.unsubMeta?.();
     this.unsubQueue = null;
+    this.unsubMeta = null;
   }
 
   async cancel() {
     this.cancelled = true;
     this.clearFillTimer();
+    this.clearCountdownTick();
     this.unsubQueue?.();
     this.unsubAssignment?.();
+    this.unsubMeta?.();
     this.unsubQueue = null;
     this.unsubAssignment = null;
+    this.unsubMeta = null;
 
     if (this.queueKey) {
       try {

@@ -1193,6 +1193,11 @@ body:has(.lobby-screen:not(.hidden)) #app {
   color: var(--accent);
 }
 
+.mm-count.mm-count--timer {
+  font-size: 42px;
+  color: #f0c674;
+}
+
 .mm-roster {
   list-style: none;
   margin: 0 0 20px;

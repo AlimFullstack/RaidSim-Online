@@ -12,7 +12,7 @@ import {
   getSurvivalRate,
   ensureMigratedProfile,
 } from './profile.js';
-import { getMapList, getMapById, pickRandomMapId } from './map-loader.js';
+import { pickRandomMapId } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
 import { getWeapon } from './weapons.js';
 import { normalizeLoadout, emptyLoadout, loadoutHasWeapon, cloneEquipped, BACKPACK_SIZE, HOTBAR_SIZE, loadoutUsed } from './inventory-core.js';
@@ -33,7 +33,6 @@ export class Lobby {
     this.profile = null;
     this.playType = 'solo';
     this.selectedMode = defaultModeForParty('solo');
-    this.selectedMap = 'factory';
     this.activeTab = 'raid';
     this.selectedShopId = null;
     this.matchmaking = null;
@@ -50,7 +49,6 @@ export class Lobby {
       rubles: document.getElementById('lobby-rubles'),
       guestBadge: document.getElementById('guest-badge'),
       modeList: document.getElementById('mode-list'),
-      mapList: document.getElementById('map-list'),
       questPanel: document.getElementById('quest-panel'),
       briefing: document.getElementById('raid-briefing'),
       stashGrid: document.getElementById('stash-grid'),
@@ -73,7 +71,6 @@ export class Lobby {
     this.bindEvents();
     setupLobbyDrag(this);
     this.renderModes();
-    this.renderMaps();
     this.renderShop();
   }
 
@@ -186,7 +183,6 @@ export class Lobby {
     this.renderQuestCard();
     this.renderBriefing();
     this.updateDeployBtn();
-    this.renderMaps();
     this.renderModes();
   }
 
@@ -222,36 +218,6 @@ export class Lobby {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
     return `${m}:${String(s).padStart(2, '0')}`;
-  }
-
-  renderMaps() {
-    if (!this.el.mapList) return;
-    this.el.mapList.innerHTML = getMapList()
-      .map((m) => {
-        const thumbClass = m.theme === 'night' ? 'map-thumb--night' : 'map-thumb--factory';
-        const active = m.id === this.selectedMap ? 'active' : '';
-        return `
-      <button type="button" class="map-card ${active}" data-map="${m.id}">
-        <div class="map-thumb ${thumbClass}">
-          <span class="map-card-check">✓</span>
-        </div>
-        <div class="map-card-body">
-          <span class="map-card-name">${m.name}</span>
-          <span class="map-card-meta">${m.timeLabel} · ${m.threat}</span>
-        </div>
-      </button>`;
-      })
-      .join('');
-
-    this.el.mapList.querySelectorAll('[data-map]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this.uiClick();
-        this.selectedMap = btn.dataset.map;
-        this.renderMaps();
-        this.renderBriefing();
-        this.updateDeployBtn();
-      });
-    });
   }
 
   renderModes() {
@@ -477,9 +443,6 @@ export class Lobby {
     };
     if (!this.auth.isGuest()) await this.persistProfile(null);
     const mapId = pickRandomMapId();
-    this.selectedMap = mapId;
-    this.renderMaps();
-    this.renderBriefing();
     this.callbacks.onPlay({
       mode: this.selectedMode,
       loadout: ld,
@@ -495,17 +458,28 @@ export class Lobby {
 
   updateMatchmakingUI(status) {
     if (!status) return;
-    const { count, min, max, players, phase } = status;
+    const { count, min, max, players, phase, countdownSec } = status;
     if (this.el.mmStatus) {
-      this.el.mmStatus.textContent =
-        phase === 'found'
-          ? 'Собираем отряд...'
-          : count < min
-            ? `Ищем игроков… нужно минимум ${min}`
-            : `Набор отряда… ждём до ${max} игроков`;
+      if (phase === 'found' || phase === 'starting') {
+        this.el.mmStatus.textContent = 'Запускаем рейд...';
+      } else if (count < min) {
+        this.el.mmStatus.textContent = `Ищем игроков… нужно минимум ${min}`;
+      } else if (phase === 'full') {
+        this.el.mmStatus.textContent = 'Отряд полон — старт!';
+      } else if (phase === 'countdown' && countdownSec > 0) {
+        this.el.mmStatus.textContent = `Старт через ${countdownSec} сек · можно присоединиться ещё ${max - count}`;
+      } else {
+        this.el.mmStatus.textContent = 'Набираем отряд...';
+      }
     }
     if (this.el.mmCount) {
-      this.el.mmCount.textContent = `${count} / ${max}`;
+      if (phase === 'countdown' && countdownSec > 0) {
+        this.el.mmCount.textContent = String(countdownSec);
+        this.el.mmCount.classList.add('mm-count--timer');
+      } else {
+        this.el.mmCount.classList.remove('mm-count--timer');
+        this.el.mmCount.textContent = `${count} / ${max}`;
+      }
     }
     if (this.el.mmRoster) {
       this.el.mmRoster.innerHTML = (players || [])
@@ -540,12 +514,12 @@ export class Lobby {
       this.cancelMatchmaking();
     };
     this.matchmaking.onReady = async (match) => {
-      this.updateMatchmakingUI({ phase: 'found', count: match.players.length, min: 2, max: 4, players: match.players });
+      this.updateMatchmakingUI({ phase: 'found', count: match.players.length, min: 2, max: 4, players: match.players, countdownSec: 0 });
       await this.launchMultiplayerRaid(match);
     };
 
     try {
-      await this.matchmaking.search(this.selectedMap, this.selectedMode);
+      await this.matchmaking.search(this.selectedMode);
     } catch (e) {
       this.matchmaking.onError(e);
     }
@@ -771,7 +745,6 @@ export class Lobby {
 
   renderBriefing() {
     if (!this.el.briefing || !this.profile) return;
-    const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
     const ld = normalizeLoadout(this.profile.loadout || {});
     const eq = ld.equipped || {};
@@ -790,10 +763,7 @@ export class Lobby {
       }
     }
 
-    const threat =
-      this.selectedMode === 'boss'
-        ? 'Босс + Scav'
-        : `Scav × ${map.scavCount || 5}`;
+    const threat = this.selectedMode === 'boss' ? 'Босс + Scav' : 'Scav на карте';
     const party = PARTY_TYPES[this.playType];
     const pvpNote =
       this.playType === 'multi' ? '<div class="briefing-row"><span class="briefing-label">PvP</span><span class="briefing-value warn">Можно убивать игроков и лутать трупы · при смерти лут теряется</span></div>' : '';
@@ -807,7 +777,7 @@ export class Lobby {
       ${pvpNote}
       <div class="briefing-row">
         <span class="briefing-label">Карта</span>
-        <span class="briefing-value">${map.name} · ${map.timeLabel}${this.playType === 'solo' ? ' · случайно при старте' : ''}</span>
+        <span class="briefing-value">Случайная при старте</span>
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Режим</span>
@@ -816,10 +786,6 @@ export class Lobby {
       <div class="briefing-row">
         <span class="briefing-label">Угроза</span>
         <span class="briefing-value">${threat}</span>
-      </div>
-      <div class="briefing-row">
-        <span class="briefing-label">Описание</span>
-        <span class="briefing-value">${map.desc}</span>
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Рюкзак</span>
@@ -832,7 +798,7 @@ export class Lobby {
     if (!this.el.deployBtn) return;
     const mode = RAID_MODES[this.selectedMode];
     if (this.playType === 'multi') {
-      this.el.deployBtn.innerHTML = `НАЙТИ ИГРУ<span class="deploy-btn-sub">${getMapById(this.selectedMap).name} · ${this.formatDuration(mode.duration)} · 2–4 игрока</span>`;
+      this.el.deployBtn.innerHTML = `НАЙТИ ИГРУ<span class="deploy-btn-sub">случайная карта · ${this.formatDuration(mode.duration)} · 2–4 игрока</span>`;
     } else {
       this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">случайная карта · ${this.formatDuration(mode.duration)}</span>`;
     }

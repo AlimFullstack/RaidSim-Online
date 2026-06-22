@@ -2,16 +2,19 @@ import { describe, it, expect } from 'vitest';
 import {
   MIN_PLAYERS,
   MAX_PLAYERS,
+  FILL_WAIT_MS,
   queueDocId,
   sortQueuePlayers,
   isQueueLeader,
   selectPlayersForMatch,
   shouldFormMatch,
+  countdownSeconds,
+  getMatchmakingPhase,
 } from '../src/matchmaking.js';
 
 describe('matchmaking helpers', () => {
-  it('queueDocId combines map and mode', () => {
-    expect(queueDocId('factory', 'standard')).toBe('factory_standard');
+  it('queueDocId keys queue by mode', () => {
+    expect(queueDocId('standard')).toBe('mm_standard');
   });
 
   it('sortQueuePlayers orders by joinedAt', () => {
@@ -54,8 +57,23 @@ describe('matchmaking helpers', () => {
     expect(shouldFormMatch(full, 0, now)).toBe(true);
   });
 
-  it('exports min 2 max 4', () => {
+  it('exports min 2 max 4 and 30s fill window', () => {
     expect(MIN_PLAYERS).toBe(2);
     expect(MAX_PLAYERS).toBe(4);
+    expect(FILL_WAIT_MS).toBe(30000);
+  });
+
+  it('countdownSeconds rounds up remaining time', () => {
+    expect(countdownSeconds(10500, 10000)).toBe(1);
+    expect(countdownSeconds(10000, 10000)).toBe(0);
+  });
+
+  it('getMatchmakingPhase uses countdown after minimum players', () => {
+    const two = [{ uid: 'a' }, { uid: 'b' }];
+    expect(getMatchmakingPhase(two, 0)).toBe('waiting');
+    expect(getMatchmakingPhase(two, 40000, 10000)).toBe('countdown');
+    expect(getMatchmakingPhase(two, 5000, 10000)).toBe('starting');
+    const four = new Array(4).fill({ uid: 'x' });
+    expect(getMatchmakingPhase(four, 0)).toBe('full');
   });
 });
