@@ -9,6 +9,7 @@ import {
   moveStashToLoadout,
   moveLoadoutToStash,
   stackItems,
+  swapLoadoutSlots,
   migrateProfile,
   emptyBackpack,
   emptyHotbar,
@@ -79,6 +80,14 @@ describe('inventory-core', () => {
     expect(loadout.hotbar.some((i) => i?.id === 'hb')).toBe(true);
   });
 
+  it('addToLoadout mutates existing slot arrays in place', () => {
+    const outerBackpack = emptyBackpack();
+    const loadout = { hotbar: emptyHotbar(), backpack: outerBackpack, equipped: { weapon: null, armor: null } };
+    addToLoadout(loadout, { id: 'loot', name: 'Loot', value: 5 });
+    expect(outerBackpack.some((i) => i?.id === 'loot')).toBe(true);
+    expect(loadout.backpack).toBe(outerBackpack);
+  });
+
   it('stash max stacks', () => {
     const stash = { items: [] };
     for (let i = 0; i < STASH_MAX_STACKS; i++) {
@@ -131,6 +140,30 @@ describe('inventory-core', () => {
     ]);
     expect(stacked).toHaveLength(1);
     expect(stacked[0].count).toBe(2);
+  });
+
+  it('addToLoadout merges stacks across backpack and hotbar', () => {
+    const loadout = {
+      hotbar: [{ id: 'ammo', name: 'Патроны', ammo: 18, value: 0, count: 2 }, null, null],
+      backpack: emptyBackpack(),
+      equipped: { weapon: null, armor: null },
+    };
+    const r = addToLoadout(loadout, { id: 'ammo', name: 'Патроны', ammo: 18, value: 0 });
+    expect(r.ok).toBe(true);
+    expect(loadout.hotbar[0].count).toBe(3);
+    expect(loadout.backpack.filter(Boolean)).toHaveLength(0);
+  });
+
+  it('swapLoadoutSlots merges matching stacks', () => {
+    const loadout = {
+      hotbar: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 1 }, null, null],
+      backpack: [{ id: 'medkit', name: 'Аптечка', heal: 50, count: 2 }, ...emptyBackpack().slice(1)],
+      equipped: { weapon: null, armor: null },
+    };
+    const r = swapLoadoutSlots(loadout, 'backpack', 0, 'hotbar', 0);
+    expect(r.ok).toBe(true);
+    expect(loadout.hotbar[0].count).toBe(3);
+    expect(loadout.backpack[0]).toBeNull();
   });
 
   it('itemsMatch requires same id and props', () => {

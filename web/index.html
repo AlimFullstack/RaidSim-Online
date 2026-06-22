@@ -185,6 +185,10 @@
             <div id="tab-raid" class="tab-pane active">
               <div id="quest-panel" class="quest-card"></div>
               <div class="raid-section">
+                <p class="section-label">ТИП РЕЙДА</p>
+                <div id="party-type-list" class="party-type-grid"></div>
+              </div>
+              <div class="raid-section">
                 <p class="section-label">ЛОКАЦИЯ</p>
                 <div id="map-list" class="map-card-grid"></div>
               </div>
@@ -223,6 +227,16 @@
         </div>
       </div>
       <div id="lobby-toast" class="lobby-toast"></div>
+    </div>
+
+    <div id="matchmaking-overlay" class="matchmaking-overlay hidden">
+      <div class="matchmaking-card tac-panel">
+        <h2 class="panel-title">ПОИСК ИГРОКОВ</h2>
+        <p id="mm-status" class="mm-status">Ищем игроков…</p>
+        <p id="mm-count" class="mm-count">1 / 4</p>
+        <ul id="mm-roster" class="mm-roster"></ul>
+        <button id="btn-mm-cancel" type="button" class="btn">ОТМЕНА</button>
+      </div>
     </div>
 
     <div id="overlay" class="overlay hidden">

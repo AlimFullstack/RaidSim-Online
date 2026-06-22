@@ -13,12 +13,14 @@ import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint, buildVisionTheme, isBlockedBySmoke } from './visibility.js';
+import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius } from './visibility.js';
 import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
 import { RaidInventoryUI, itemIcon, slotItemHint } from './inventory-ui.js';
 import { HOTBAR_SIZE } from './inventory-core.js';
+import { RaidMultiplayer } from './multiplayer-sync.js';
+import { getFirestoreDb } from './auth.js';
 
 const INTERACT_RADIUS = 50;
 const SEARCH_TIME = 1.8;
@@ -57,6 +59,10 @@ export class Game {
     this.noiseEvents = [];
     this.smokeZones = [];
     this.playerCorpse = null;
+    this.pmcCorpses = [];
+    this.multiplayer = null;
+    this.partyType = 'solo';
+    this.mpDisplayName = 'Оператор';
     this.grenadeCooldown = 0;
     this.thrownGrenades = [];
     this.bossReinforceTimer = 30;
@@ -72,11 +78,17 @@ export class Game {
     this.inventoryUi = new RaidInventoryUI(this);
   }
 
-  async startRaid(mode = 'standard', loadout = {}, mapId = 'factory') {
+  async startRaid(mode = 'standard', loadout = {}, mapId = 'factory', mpOptions = null) {
     this.audio?.unlock('raid');
     this.audio?.startMusic('raid');
     this.fx.clear();
     this.raidMode = mode;
+    this.partyType = mpOptions?.partyType || 'solo';
+    this.mpDisplayName = mpOptions?.displayName || 'Оператор';
+    if (this.multiplayer) {
+      await this.multiplayer.destroy();
+      this.multiplayer = null;
+    }
     const modeConfig = RAID_MODES[mode] || RAID_MODES.standard;
     this.activeMap = await loadMap(mapId);
     setMapBounds(this.activeMap.mapW, this.activeMap.mapH);
@@ -84,7 +96,9 @@ export class Game {
     this.raidTimeLeft = modeConfig.duration;
     this.bullets = [];
     const walls = this.activeMap.walls;
-    this.player = new Player(this.activeMap.spawnPlayer.x, this.activeMap.spawnPlayer.y, walls);
+    const spawnSlot = mpOptions?.players?.find((pl) => pl.uid === mpOptions.uid)?.slot ?? 0;
+    const spawn = mpOptions ? this.getSpawnForSlot(spawnSlot) : this.activeMap.spawnPlayer;
+    this.player = new Player(spawn.x, spawn.y, walls);
     this.player.initRaidInventory(loadout);
     this.lootPoints = this.activeMap.lootPoints.map((p) => new LootPoint(p.x, p.y, p.tier));
     this.scavs = this.activeMap.scavSpawns.map((s) => new Scav(s.x, s.y, walls));
@@ -103,6 +117,7 @@ export class Game {
     this.bossReinforceCount = 0;
     this.groundItems = [];
     this.playerCorpse = null;
+    this.pmcCorpses = [];
     this.noiseEvents = [];
     this.scavAlerted = new Set();
     this.wasInExtract = false;
@@ -117,6 +132,25 @@ export class Game {
     this._hudCache = '';
     this.inventoryUi?.toggle(false);
     this.resize();
+
+    if (mpOptions?.matchId && mpOptions.uid) {
+      const db = getFirestoreDb();
+      if (db) {
+        this.multiplayer = new RaidMultiplayer(db, mpOptions.matchId, mpOptions.uid, this);
+        await this.multiplayer.start(mpOptions.players || [], walls);
+      }
+    }
+  }
+
+  getSpawnForSlot(slotIndex) {
+    const base = this.activeMap.spawnPlayer;
+    const angles = [0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5];
+    const ring = Math.floor(slotIndex / 4);
+    const a = angles[slotIndex % 4];
+    const dist = 90 + ring * 50;
+    const x = base.x + Math.cos(a) * dist;
+    const y = base.y + Math.sin(a) * dist;
+    return findFreeSpawnNear(x, y, this.activeMap.walls, 16) || { x, y };
   }
 
   applySettings(settings) {
@@ -317,7 +351,13 @@ export class Game {
     this.updateThrownGrenades(dt);
     this.updateBossReinforcements(dt);
 
+    const viewW = this.canvas.width / this.scale;
+    const viewH = this.canvas.height / this.scale;
+    const mapTheme = getMapTheme(this.activeMap?.theme);
+    const pVisionR = playerVisionRadius(viewW, viewH, p.hp / p.maxHp, mapTheme);
+
     for (const scav of this.scavs) {
+      scav.vision = npcVisionRadius(pVisionR, scav.isBoss);
       const wasReloading = scav.reloadTime > 0;
       const wasAttack = scav.state === 'attack';
       const b = scav.update(dt, p, this.bullets, this.noiseEvents, this.smokeZones);
@@ -352,18 +392,39 @@ export class Game {
 
     this.updateBullets(dt);
 
+    if (this.multiplayer) this.multiplayer.update(dt);
+
     if (p.dead && !this.playerCorpse) {
-      this.playerCorpse = new PlayerCorpse(p.x, p.y, p.getCarriedLoot());
+      const corpse = new PlayerCorpse(p.x, p.y, p.getCarriedLoot(), {
+        ownerUid: this.multiplayer?.myUid || 'local',
+        label: this.mpDisplayName,
+      });
+      this.pmcCorpses.push(corpse);
+      this.playerCorpse = corpse;
+      this.multiplayer?.publishDeath(p.x, p.y, p.getCarriedLoot());
       this.audio?.play('death');
       this.fx.bloodBurst(p.x, p.y);
-      this.endRaid('dead', 'ТЫ ПОГИБ', 'PMC уничтожен. Лут остался на карте.');
+      const deadMsg =
+        this.partyType === 'multi'
+          ? 'Ты погиб. Лут на теле — другие игроки могут обыскать.'
+          : 'PMC уничтожен. Лут остался на карте.';
+      this.endRaid('dead', 'ТЫ ПОГИБ', deadMsg);
     }
 
-    this.fx.update(dt);
+    if (this.state === 'raid' && this.player && !this.player.dead) {
+      this.fx.update(dt, {
+        sprinting: this.player.isSprinting,
+        moving: this.player.isMoving,
+        hpRatio: this.player.hp / this.player.maxHp,
+      });
+      this.scale = this.fx.getRaidScale(1.35);
+    } else {
+      this.fx.update(dt);
+      if (this.state === 'raid') this.scale = 1.35;
+    }
 
     this.updateCamera();
     this.ui.updateHud(this);
-    if (this.inventoryUi.open) this.inventoryUi.render();
     this.input.endFrame();
   }
 
@@ -435,10 +496,11 @@ export class Game {
     let best = null;
     let bestDist = Infinity;
 
-    if (this.playerCorpse && !this.playerCorpse.looted) {
-      const d = dist(p.x, p.y, this.playerCorpse.x, this.playerCorpse.y);
-      if (d < INTERACT_RADIUS && this.canSee(this.playerCorpse.x, this.playerCorpse.y)) {
-        best = { type: 'pmc', target: this.playerCorpse, x: this.playerCorpse.x, y: this.playerCorpse.y, d };
+    for (const corpse of this.pmcCorpses) {
+      if (corpse.looted) continue;
+      const d = dist(p.x, p.y, corpse.x, corpse.y);
+      if (d < INTERACT_RADIUS && d < (best?.d ?? Infinity) && this.canSee(corpse.x, corpse.y)) {
+        best = { type: 'pmc', target: corpse, x: corpse.x, y: corpse.y, d };
       }
     }
 
@@ -536,6 +598,9 @@ export class Game {
       const corpse = near.target;
       corpse.looted = true;
       corpse.searchProgress = 0;
+      if (corpse.ownerUid && this.multiplayer) {
+        this.multiplayer.markCorpseLooted(corpse.ownerUid);
+      }
       const msgs = [];
       for (const item of corpse.loot) {
         const result = p.addLoot(item);
@@ -621,6 +686,24 @@ export class Game {
             break;
           }
         }
+        if (!b.dead && this.multiplayer) {
+          for (const rp of this.multiplayer.values()) {
+            if (rp.dead) continue;
+            if (dist(b.x, b.y, rp.x, rp.y) < rp.r + b.r) {
+              b.dead = true;
+              this.fx.hitSparks(b.x, b.y);
+              this.audio?.play('hit');
+              this.multiplayer.reportHit(rp.uid, b.damage);
+              if (rp.hp - b.damage <= 0) {
+                p.kills += 1;
+                this.audio?.play('kill');
+                this.fx.bloodBurst(rp.x, rp.y);
+                this.setStatus(`Игрок ${rp.name} убит`, 2, 'combat');
+              }
+              break;
+            }
+          }
+        }
       } else if (b.owner === 'scav' && !p.dead) {
         let inSmoke = isBlockedBySmoke(p.x, p.y, b.x, b.y, this.smokeZones);
         if (!inSmoke) {
@@ -650,6 +733,12 @@ export class Game {
     const loot = survived ? p.getCarriedLoot() : [];
     const lootValue = lootTotalValue(loot);
     const lootCount = loot.length;
+    const mpHint =
+      this.partyType === 'multi' && type === 'dead'
+        ? 'В мультиплеере лут остаётся на теле для других игроков'
+        : type === 'dead'
+          ? 'Рюкзак потерян. Лут остаётся только у убитых Scav (E) и на точках поиска'
+          : 'Рюкзак не сохранён — нужен успешный экстракт';
     this.endPayload = {
       type,
       title,
@@ -659,12 +748,11 @@ export class Game {
       kills: p.kills,
       mode: this.raidMode,
       mapId: this.activeMap?.id,
+      partyType: this.partyType,
       saveHint:
         type === 'extracted'
-          ? `После «В лобби» ${lootCount} предм. попадут в схрон, +${lootValue}₽ на счёт`
-          : type === 'dead'
-            ? 'Рюкзак потерян. Лут остаётся только у убитых Scav (E) и на точках поиска'
-            : 'Рюкзак не сохранён — нужен успешный экстракт',
+          ? `После «В лобби» ${lootCount} стак. в схрон · продай в схроне за ${lootValue}₽`
+          : mpHint,
     };
     this.ui.showEnd(this.endPayload);
     this.ui.hideHud();
@@ -672,6 +760,11 @@ export class Game {
     const musicDelay = type === 'extracted' ? 2800 : 1600;
     setTimeout(() => this.audio?.startMusic('lobby'), musicDelay);
     if (type === 'extracted' && this.confetti) this.confetti.burst(150);
+    if (this.multiplayer) {
+      const mp = this.multiplayer;
+      this.multiplayer = null;
+      mp.destroy();
+    }
   }
 
   getEndPayload() {
@@ -686,8 +779,9 @@ export class Game {
     const viewH = this.canvas.height / this.scale;
     this.camX = Math.max(0, Math.min(mapW - viewW, this.player.x - viewW / 2));
     this.camY = Math.max(0, Math.min(mapH - viewH, this.player.y - viewH / 2));
-    this.camRenderX = Math.max(0, Math.min(mapW - viewW, this.camX + (this.fx.camKickX || 0)));
-    this.camRenderY = Math.max(0, Math.min(mapH - viewH, this.camY + (this.fx.camKickY || 0)));
+    const camOff = this.fx.getCameraOffset();
+    this.camRenderX = Math.max(0, Math.min(mapW - viewW, this.camX + camOff.x));
+    this.camRenderY = Math.max(0, Math.min(mapH - viewH, this.camY + camOff.y));
     this.input.updateWorld(this.camX, this.camY, this.scale, this.canvas);
   }
 
@@ -739,8 +833,13 @@ export class Game {
     for (const scav of this.scavs) {
       if (this.canSee(scav.x, scav.y)) scav.draw(ctx);
     }
-    if (this.playerCorpse && this.canSee(this.playerCorpse.x, this.playerCorpse.y)) {
-      this.playerCorpse.draw(ctx);
+    for (const corpse of this.pmcCorpses) {
+      if (this.canSee(corpse.x, corpse.y)) corpse.draw(ctx);
+    }
+    if (this.multiplayer) {
+      for (const rp of this.multiplayer.values()) {
+        if (this.canSee(rp.x, rp.y)) rp.draw(ctx);
+      }
     }
     for (const gi of this.groundItems) {
       if (this.canSee(gi.x, gi.y)) gi.draw(ctx);
@@ -849,7 +948,11 @@ export function createUI() {
       const lootEl = document.getElementById('end-loot');
       lootEl.innerHTML = payload.loot.length
         ? payload.loot
-            .map((i) => `<span class="loot-chip">${itemIcon(i)} ${i.name} <b>${i.value || 0}₽</b></span>`)
+            .map((i) => {
+              const count = i.count > 1 ? ` ×${i.count}` : '';
+              const worth = (i.value || 0) * (i.count || 1);
+              return `<span class="loot-chip">${itemIcon(i)} ${i.name}${count} <b>${worth}₽</b></span>`;
+            })
             .join('')
         : '<span class="loot-chip empty">В рюкзаке ничего — ищи E на карте</span>';
       const backBtn = document.getElementById('btn-retry');

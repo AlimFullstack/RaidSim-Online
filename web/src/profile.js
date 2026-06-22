@@ -17,6 +17,25 @@ export const RAID_MODES = {
   boss: { id: 'boss', name: 'Босс-рейд', duration: 6 * 60, desc: '6 минут, босс в центре, редкий лут' },
 };
 
+export const PARTY_TYPES = {
+  solo: { id: 'solo', name: 'Одиночный', desc: 'Только против ИИ' },
+  multi: { id: 'multi', name: 'Мультиплеер', desc: '2–4 игрока · PvP' },
+};
+
+export const MODES_BY_PARTY = {
+  solo: ['quick', 'boss'],
+  multi: ['standard', 'boss'],
+};
+
+export function getModesForParty(partyType) {
+  const ids = MODES_BY_PARTY[partyType] || MODES_BY_PARTY.solo;
+  return ids.map((id) => RAID_MODES[id]).filter(Boolean);
+}
+
+export function defaultModeForParty(partyType) {
+  return MODES_BY_PARTY[partyType]?.[0] || 'quick';
+}
+
 export const SHOP_ITEMS = [
   { id: 'pm', name: 'ПМ', cost: 0, item: { id: 'pm_shop', name: 'ПМ', weapon: 'pm', value: 1 } },
   { id: 'pp', name: 'ПП-91', cost: 240, item: { id: 'pp', name: 'ПП-91', weapon: 'pp', value: 28 } },
@@ -72,13 +91,15 @@ export function applyRaidResult(profile, result) {
   if (result.type === 'extracted') {
     p.stats.extracts += 1;
     let lootValue = 0;
-    for (const item of result.loot || []) {
+    let overflowRubles = 0;
+    for (const item of stackItems(result.loot || [])) {
       const added = addToStash(p.stash, item, item.count || 1);
-      if (!added.ok) lootValue += (item.value || 0) * (item.count || 1);
-      else lootValue += (item.value || 0) * (item.count || 1);
+      const worth = (item.value || 0) * (item.count || 1);
+      lootValue += worth;
+      if (!added.ok) overflowRubles += worth;
     }
     p.stats.totalLootValue += lootValue;
-    p.rubles += lootValue;
+    p.rubles += overflowRubles;
     let xpGain = (result.kills || 0) * 15 + lootValue * 2;
     if (result.mode === 'quick') xpGain = Math.floor(xpGain * 1.2);
     p.xp += xpGain;
@@ -115,7 +136,8 @@ export function sellStashItem(profile, index) {
   });
   const item = p.stash.items[index];
   if (!item) return { ok: false, msg: 'Нет предмета' };
-  const value = (item.value || 1) * (item.count || 1);
+  const value = (item.value || 0) * (item.count || 1);
+  if (value <= 0) return { ok: false, msg: 'Нечего продавать', profile: p };
   p.rubles += value;
   p.stash.items.splice(index, 1);
   return { ok: true, profile: p, msg: `Продано: ${item.name}${item.count > 1 ? ` ×${item.count}` : ''}` };

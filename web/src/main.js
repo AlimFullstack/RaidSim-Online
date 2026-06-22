@@ -101,11 +101,18 @@ async function boot() {
   lobby = new Lobby(auth, storage, {
     audio,
     unlockAudio: () => audio.unlock(preferredMusicTrack()),
-    onPlay(mode, loadout, mapId) {
+    onPlay(opts) {
       audio.unlock('raid');
       audio.startMusic('raid');
       festiveBg.setActive(false);
-      game.startRaid(mode, loadout, mapId);
+      const { mode, loadout, mapId, partyType, matchId, uid, players, displayName } = opts;
+      game.startRaid(mode, loadout, mapId, {
+        partyType,
+        matchId,
+        uid,
+        players,
+        displayName,
+      });
     },
   });
 

@@ -86,6 +86,10 @@ export class RaidInventoryUI {
 
   setupDrag() {
     this.el?.addEventListener('dragstart', (e) => {
+      if (e.target.closest('button')) {
+        e.preventDefault();
+        return;
+      }
       const bp = e.target.closest('[data-bp-idx]');
       const hb = e.target.closest('[data-hb-idx]');
       const eq = e.target.closest('[data-equip-type]');
@@ -119,22 +123,28 @@ export class RaidInventoryUI {
       e.target.closest('.inv-slot')?.classList.add('dragging');
     });
 
-    this.el?.addEventListener('dragend', () => {
+    this.el?.addEventListener('dragend', (e) => {
       if (!this.dropHandled && this.dragPayload && this.game.state === 'raid') {
-        this.dropPayloadToGround(this.dragPayload);
+        const overOverlay = this.el?.contains(document.elementFromPoint(e.clientX, e.clientY));
+        if (!overOverlay) this.dropPayloadToGround(this.dragPayload);
       }
       this.dragPayload = null;
       this.dropHandled = false;
       this.el?.querySelectorAll('.dragging, .drop-target').forEach((n) => {
         n.classList.remove('dragging', 'drop-target');
       });
+      if (this.open) this.render();
     });
 
     this.el?.addEventListener('dragover', (e) => {
-      const zone = e.target.closest('[data-raid-drop]');
-      if (!zone) return;
+      if (!this.dragPayload) return;
       e.preventDefault();
-      zone.classList.add('drop-target');
+      e.dataTransfer.dropEffect = 'move';
+      const zone = e.target.closest('[data-raid-drop]');
+      this.el?.querySelectorAll('.drop-target').forEach((n) => {
+        if (!zone || n !== zone) n.classList.remove('drop-target');
+      });
+      zone?.classList.add('drop-target');
     });
 
     this.el?.addEventListener('dragleave', (e) => {
@@ -143,13 +153,13 @@ export class RaidInventoryUI {
     });
 
     this.el?.addEventListener('drop', (e) => {
-      const zone = e.target.closest('[data-raid-drop]');
-      if (!zone) return;
       e.preventDefault();
+      e.stopPropagation();
       this.dropHandled = true;
-      zone.classList.remove('drop-target');
+      const zone = e.target.closest('[data-raid-drop]');
+      this.el?.querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
       const p = this.game.player;
-      if (!p) return;
+      if (!p || !zone) return;
 
       let payload = this.dragPayload;
       try {
@@ -238,7 +248,7 @@ export class RaidInventoryUI {
 
   render() {
     const p = this.game.player;
-    if (!p || !this.gridEl) return;
+    if (!p || !this.gridEl || this.dragPayload) return;
 
     const filled = p.backpackFilledCount();
     if (this.countEl) {

@@ -184,6 +184,12 @@ export class GameFx {
     this.extractGlow = 0;
     this.camKickX = 0;
     this.camKickY = 0;
+    this.fovMul = 1;
+    this.fovKick = 0;
+    this.camShakeAmp = 0;
+    this.camShakeX = 0;
+    this.camShakeY = 0;
+    this.camShakePhase = 0;
     this._fogCanvas = null;
   }
 
@@ -197,6 +203,12 @@ export class GameFx {
     this.extractGlow = 0;
     this.camKickX = 0;
     this.camKickY = 0;
+    this.fovMul = 1;
+    this.fovKick = 0;
+    this.camShakeAmp = 0;
+    this.camShakeX = 0;
+    this.camShakeY = 0;
+    this.camShakePhase = 0;
   }
 
   spawnParticles(x, y, opts = {}) {
@@ -243,8 +255,23 @@ export class GameFx {
   }
 
   kickCamera(strength, angle) {
-    this.camKickX += Math.cos(angle + Math.PI) * strength * 0.35;
-    this.camKickY += Math.sin(angle + Math.PI) * strength * 0.35;
+    const kick = strength * 0.62;
+    this.camKickX += Math.cos(angle + Math.PI) * kick;
+    this.camKickY += Math.sin(angle + Math.PI) * kick;
+    this.fovKick = Math.max(this.fovKick, strength * 0.014);
+    this.addShake(strength * 0.42);
+  }
+
+  addShake(amount = 4) {
+    this.camShakeAmp = Math.min(16, this.camShakeAmp + amount);
+  }
+
+  getCameraOffset() {
+    return { x: this.camKickX + this.camShakeX, y: this.camKickY + this.camShakeY };
+  }
+
+  getRaidScale(base = 1.35) {
+    return base * this.fovMul;
   }
 
   shellCasing(x, y, angle) {
@@ -281,6 +308,8 @@ export class GameFx {
     this.spawnParticles(x, y, { count: 12, color: '#555', speed: 80, life: 0.8, size: 6 });
     this.screenFlash = 0.15;
     this.screenFlashColor = 'rgba(255, 100, 40, 0.35)';
+    this.addShake(9);
+    this.fovKick = Math.max(this.fovKick, 0.04);
   }
 
   smokePuff(x, y) {
@@ -314,9 +343,11 @@ export class GameFx {
   }
 
   damageScreen(amount = 14) {
-    this.screenFlash = Math.min(0.45, this.screenFlash + 0.12);
-    this.screenFlashColor = `rgba(220, 40, 40, ${0.25 + amount / 80})`;
-    this.vignette = Math.min(0.7, this.vignette + 0.25);
+    this.screenFlash = Math.min(0.5, this.screenFlash + 0.14);
+    this.screenFlashColor = `rgba(220, 40, 40, ${0.28 + amount / 70})`;
+    this.vignette = Math.min(0.55, this.vignette + 0.18);
+    this.addShake(2.5 + amount * 0.22);
+    this.fovKick = Math.max(this.fovKick, 0.022 + amount * 0.0008);
   }
 
   wallHit(x, y) {
@@ -361,7 +392,7 @@ export class GameFx {
     });
   }
 
-  update(dt) {
+  update(dt, opts = {}) {
     this.particles = this.particles.filter((p) => {
       p.life -= dt;
       p.x += p.vx * dt;
@@ -395,10 +426,29 @@ export class GameFx {
     });
 
     if (this.screenFlash > 0) this.screenFlash = Math.max(0, this.screenFlash - dt * 1.8);
-    if (this.vignette > 0) this.vignette = Math.max(0, this.vignette - dt * 0.8);
+    if (this.vignette > 0) this.vignette = Math.max(0, this.vignette - dt * 0.9);
     if (this.extractGlow > 0) this.extractGlow = Math.max(0, this.extractGlow - dt * 1.2);
-    this.camKickX *= Math.max(0, 1 - dt * 14);
-    this.camKickY *= Math.max(0, 1 - dt * 14);
+
+    this.fovKick *= Math.max(0, 1 - dt * 20);
+    const hpRatio = opts.hpRatio ?? 1;
+    const sprintZoom = opts.sprinting ? -0.045 : 0;
+    const moveZoom = opts.moving && !opts.sprinting ? -0.012 : 0;
+    const hurtZoom = hpRatio < 0.35 ? (0.35 - hpRatio) * 0.1 : 0;
+    this.fovMul = 1 + this.fovKick + sprintZoom + moveZoom + hurtZoom;
+
+    this.camKickX *= Math.max(0, 1 - dt * 16);
+    this.camKickY *= Math.max(0, 1 - dt * 16);
+
+    this.camShakeAmp *= Math.max(0, 1 - dt * 11);
+    this.camShakePhase += dt * 48;
+    if (this.camShakeAmp > 0.08) {
+      const s = this.camShakeAmp;
+      this.camShakeX = (Math.sin(this.camShakePhase * 1.9) + Math.sin(this.camShakePhase * 3.7) * 0.45) * s;
+      this.camShakeY = (Math.cos(this.camShakePhase * 2.4) + Math.cos(this.camShakePhase * 4.1) * 0.4) * s * 0.9;
+    } else {
+      this.camShakeX = 0;
+      this.camShakeY = 0;
+    }
   }
 
   drawWorld(ctx) {
@@ -499,21 +549,63 @@ export class GameFx {
     ctx.drawImage(fc, camX - pad, camY - pad);
   }
 
-  drawCriticalHpPulse(ctx, w, h, time = 0) {
-    const pulse = 0.5 + 0.45 * Math.sin(time * 7);
-    const pad = Math.max(w, h) * 0.08;
+  drawLowHpEdges(ctx, w, h, hpRatio, time = 0) {
+    if (hpRatio >= 0.35) return;
+    const severity = 1 - hpRatio / 0.35;
+    const critical = hpRatio < 0.2;
+    const pulse = 0.72 + 0.28 * Math.sin(time * (critical ? 9 : 5));
+    const edgeW = Math.max(18, Math.min(w, h) * (0.05 + severity * 0.07));
+    const a = (0.28 + severity * 0.62) * pulse;
+    const bleed = critical ? 0.18 : 0.1;
+
     ctx.save();
-    ctx.strokeStyle = `rgba(220, 40, 40, ${pulse})`;
-    ctx.lineWidth = Math.max(10, pad * 0.35);
-    ctx.strokeRect(pad * 0.5, pad * 0.5, w - pad, h - pad);
-    const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.72, 'rgba(0,0,0,0)');
-    g.addColorStop(0.9, `rgba(160, 20, 20, ${pulse * 0.45})`);
-    g.addColorStop(1, `rgba(200, 30, 30, ${pulse * 0.75})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
+
+    const top = ctx.createLinearGradient(0, 0, 0, edgeW);
+    top.addColorStop(0, `rgba(190, 24, 24, ${a})`);
+    top.addColorStop(0.45, `rgba(120, 12, 12, ${a * 0.45})`);
+    top.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = top;
+    ctx.fillRect(0, 0, w, edgeW);
+
+    const bottom = ctx.createLinearGradient(0, h, 0, h - edgeW);
+    bottom.addColorStop(0, `rgba(190, 24, 24, ${a})`);
+    bottom.addColorStop(0.45, `rgba(120, 12, 12, ${a * 0.45})`);
+    bottom.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bottom;
+    ctx.fillRect(0, h - edgeW, w, edgeW);
+
+    const left = ctx.createLinearGradient(0, 0, edgeW, 0);
+    left.addColorStop(0, `rgba(190, 24, 24, ${a * 0.92})`);
+    left.addColorStop(0.45, `rgba(120, 12, 12, ${a * 0.4})`);
+    left.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = left;
+    ctx.fillRect(0, 0, edgeW, h);
+
+    const right = ctx.createLinearGradient(w, 0, w - edgeW, 0);
+    right.addColorStop(0, `rgba(190, 24, 24, ${a * 0.92})`);
+    right.addColorStop(0.45, `rgba(120, 12, 12, ${a * 0.4})`);
+    right.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = right;
+    ctx.fillRect(w - edgeW, 0, edgeW, h);
+
+    if (critical) {
+      ctx.strokeStyle = `rgba(255, 70, 70, ${pulse * 0.35})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+    }
+
+    ctx.globalAlpha = bleed * pulse;
+    ctx.fillStyle = `rgba(255, 40, 40, ${0.08 + severity * 0.12})`;
+    ctx.fillRect(0, 0, w, 3);
+    ctx.fillRect(0, h - 3, w, 3);
+    ctx.fillRect(0, 0, 3, h);
+    ctx.fillRect(w - 3, 0, 3, h);
+
     ctx.restore();
+  }
+
+  drawCriticalHpPulse(ctx, w, h, time = 0, hpRatio = 0.15) {
+    this.drawLowHpEdges(ctx, w, h, hpRatio, time);
   }
 
   drawRaidVignette(ctx, w, h, light = false) {
@@ -563,9 +655,11 @@ export class GameFx {
     }
 
     if (opts.raid) {
-      const critical = (opts.hpRatio ?? 1) < 0.2;
-      this.drawRaidVignette(ctx, w, h, !critical);
-      if (critical) this.drawCriticalHpPulse(ctx, w, h, opts.time || 0);
+      const hpRatio = opts.hpRatio ?? 1;
+      const lowHp = hpRatio < 0.35;
+      this.drawRaidVignette(ctx, w, h, lowHp);
+      if (lowHp) this.drawLowHpEdges(ctx, w, h, hpRatio, opts.time || 0);
+      if (opts.time) this.drawFilmGrain(ctx, w, h, opts.time);
     }
   }
 }

@@ -28,6 +28,7 @@ import {
   findEmptyLoadoutSlot,
   swapLoadoutSlots,
   cloneItem,
+  stackItems,
 } from './inventory-core.js';
 import {
   getMapTheme,
@@ -396,7 +397,7 @@ export class Player extends Entity {
     }
     if (this.equipped.weapon) loot.push(cloneItem(this.equipped.weapon));
     if (this.equipped.armor) loot.push(cloneItem(this.equipped.armor));
-    return loot;
+    return stackItems(loot);
   }
 
   getLootValue() {
@@ -519,18 +520,13 @@ export class Player extends Entity {
   }
 
   swapInventorySlots(fromZone, fromIdx, toZone, toIdx) {
-    const r = swapLoadoutSlots(
-      { hotbar: this.hotbar, backpack: this.backpack },
+    return swapLoadoutSlots(
+      { hotbar: this.hotbar, backpack: this.backpack, equipped: this.equipped },
       fromZone,
       fromIdx,
       toZone,
       toIdx
     );
-    if (r.ok && r.loadout) {
-      this.hotbar = r.loadout.hotbar;
-      this.backpack = r.loadout.backpack;
-    }
-    return r;
   }
 
   dropEquipped(type) {
@@ -770,7 +766,11 @@ export class Player extends Entity {
 
   addLoot(item) {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
-    const r = addToLoadout({ hotbar: this.hotbar, backpack: this.backpack }, item, item.count || 1);
+    const r = addToLoadout(
+      { hotbar: this.hotbar, backpack: this.backpack, equipped: this.equipped },
+      item,
+      item.count || 1
+    );
     if (!r.ok) return { ok: false, msg: 'Рюкзак полон! Выброси (Q) или разверни рюкзак' };
     const price = item.value ? ` · ${item.value}₽` : '';
     let hint = 'Tab — рюкзак';
@@ -889,7 +889,7 @@ export class Scav extends Entity {
     this.wait = 0;
     this.fireCooldown = 0;
     this.speed = this.isBoss ? 65 : 43;
-    this.vision = this.isBoss ? 336 : 288;
+    this.vision = 320;
     this.burstIndex = 0;
     this.burstPause = 0;
     this.burstSize = this.isBoss ? 0 : 3;
@@ -1237,13 +1237,15 @@ export class Scav extends Entity {
 }
 
 export class PlayerCorpse {
-  constructor(x, y, loot = []) {
+  constructor(x, y, loot = [], opts = {}) {
     this.x = x;
     this.y = y;
     this.loot = loot;
     this.looted = false;
     this.searchProgress = 0;
     this.r = 18;
+    this.ownerUid = opts.ownerUid || null;
+    this.label = opts.label || 'PMC';
   }
 
   draw(ctx) {
@@ -1255,8 +1257,71 @@ export class PlayerCorpse {
       ctx.fillStyle = '#7ec8ff';
       ctx.font = '9px JetBrains Mono';
       ctx.textAlign = 'center';
-      ctx.fillText('PMC', this.x, this.y - 22);
+      ctx.fillText(this.label.slice(0, 8), this.x, this.y - 22);
     }
+  }
+}
+
+export class RemotePlayer {
+  constructor(uid, name, x, y, walls = []) {
+    this.uid = uid;
+    this.name = name;
+    this.x = x;
+    this.y = y;
+    this.targetX = x;
+    this.targetY = y;
+    this.angle = 0;
+    this.hp = 100;
+    this.maxHp = 100;
+    this.dead = false;
+    this.r = 16;
+    this.walls = walls;
+  }
+
+  applyState(s) {
+    if (s.x != null) this.targetX = s.x;
+    if (s.y != null) this.targetY = s.y;
+    if (s.angle != null) this.angle = s.angle;
+    if (s.hp != null) this.hp = s.hp;
+    if (s.maxHp != null) this.maxHp = s.maxHp;
+    if (s.dead) this.dead = true;
+    if (s.name) this.name = s.name;
+  }
+
+  update(dt) {
+    const t = Math.min(1, dt * 12);
+    this.x += (this.targetX - this.x) * t;
+    this.y += (this.targetY - this.y) * t;
+  }
+
+  draw(ctx) {
+    if (this.dead) return;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 14, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#c45c5c';
+    ctx.beginPath();
+    ctx.arc(0, 0, this.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    const hpPct = this.maxHp > 0 ? this.hp / this.maxHp : 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(this.x - 16, this.y - 28, 32, 4);
+    ctx.fillStyle = hpPct > 0.35 ? '#2ecc71' : '#e74c3c';
+    ctx.fillRect(this.x - 16, this.y - 28, 32 * hpPct, 4);
+
+    ctx.fillStyle = '#e8dcc8';
+    ctx.font = '8px JetBrains Mono';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.name.slice(0, 10), this.x, this.y - 32);
   }
 }
 

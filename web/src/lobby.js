@@ -2,6 +2,9 @@ import {
   xpToLevel,
   xpForNextLevel,
   RAID_MODES,
+  PARTY_TYPES,
+  getModesForParty,
+  defaultModeForParty,
   SHOP_ITEMS,
   buyShopItem,
   sellStashItem,
@@ -15,6 +18,8 @@ import { getWeapon } from './weapons.js';
 import { normalizeLoadout, emptyLoadout, loadoutHasWeapon, cloneEquipped, BACKPACK_SIZE, HOTBAR_SIZE, loadoutUsed } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
+import { Matchmaking } from './matchmaking.js';
+import { getFirestoreDb } from './auth.js';
 
 const SHOP_ICONS = { pm: '🔫', pp: '🔫', medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
 const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
@@ -26,10 +31,13 @@ export class Lobby {
     this.callbacks = callbacks;
     this.audio = callbacks.audio || null;
     this.profile = null;
-    this.selectedMode = 'standard';
+    this.playType = 'solo';
+    this.selectedMode = defaultModeForParty('solo');
     this.selectedMap = 'factory';
     this.activeTab = 'raid';
     this.selectedShopId = null;
+    this.matchmaking = null;
+    this.pendingLoadout = null;
 
     this.el = {
       auth: document.getElementById('auth-screen'),
@@ -54,6 +62,12 @@ export class Lobby {
       slotsRight: null,
       charCanvas: document.getElementById('lobby-char'),
       deployBtn: document.getElementById('btn-play'),
+      partyTypeList: document.getElementById('party-type-list'),
+      matchmakingOverlay: document.getElementById('matchmaking-overlay'),
+      mmStatus: document.getElementById('mm-status'),
+      mmCount: document.getElementById('mm-count'),
+      mmRoster: document.getElementById('mm-roster'),
+      mmCancelBtn: document.getElementById('btn-mm-cancel'),
     };
 
     this.bindEvents();
@@ -93,6 +107,10 @@ export class Lobby {
     document.getElementById('btn-play')?.addEventListener('click', () => {
       uiClick();
       this.play();
+    });
+    document.getElementById('btn-mm-cancel')?.addEventListener('click', () => {
+      uiClick();
+      this.cancelMatchmaking();
     });
     document.getElementById('btn-logout')?.addEventListener('click', () => this.logout());
 
@@ -164,11 +182,40 @@ export class Lobby {
   }
 
   renderRaidTab() {
+    this.renderPartyTypes();
     this.renderQuestCard();
     this.renderBriefing();
     this.updateDeployBtn();
     this.renderMaps();
     this.renderModes();
+  }
+
+  renderPartyTypes() {
+    if (!this.el.partyTypeList) return;
+    this.el.partyTypeList.innerHTML = Object.values(PARTY_TYPES)
+      .map((pt) => {
+        const active = pt.id === this.playType ? 'active' : '';
+        return `
+      <button type="button" class="party-type-card ${active}" data-party="${pt.id}">
+        <span class="party-type-name">${pt.name}</span>
+        <span class="party-type-desc">${pt.desc}</span>
+      </button>`;
+      })
+      .join('');
+
+    this.el.partyTypeList.querySelectorAll('[data-party]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.uiClick();
+        const next = btn.dataset.party;
+        if (next === this.playType) return;
+        this.playType = next;
+        const modes = getModesForParty(this.playType);
+        if (!modes.some((m) => m.id === this.selectedMode)) {
+          this.selectedMode = defaultModeForParty(this.playType);
+        }
+        this.renderRaidTab();
+      });
+    });
   }
 
   formatDuration(sec) {
@@ -209,7 +256,8 @@ export class Lobby {
 
   renderModes() {
     if (!this.el.modeList) return;
-    this.el.modeList.innerHTML = Object.values(RAID_MODES)
+    const modes = getModesForParty(this.playType);
+    this.el.modeList.innerHTML = modes
       .map((m) => {
         const active = m.id === this.selectedMode ? 'active' : '';
         const bossClass = m.id === 'boss' ? 'mode-card--boss' : '';
@@ -408,6 +456,21 @@ export class Lobby {
       this.flash('Надень оружие на персонажа или положи в рюкзак');
       return;
     }
+
+    if (this.playType === 'multi') {
+      if (this.auth.isGuest()) {
+        this.flash('Мультиплеер доступен после входа через Google');
+        return;
+      }
+      const db = getFirestoreDb();
+      if (!db) {
+        this.flash('Firebase не настроен — мультиплеер недоступен');
+        return;
+      }
+      await this.startMatchmaking(ld, db);
+      return;
+    }
+
     this.profile = {
       ...this.profile,
       loadout: emptyLoadout(),
@@ -417,7 +480,110 @@ export class Lobby {
     this.selectedMap = mapId;
     this.renderMaps();
     this.renderBriefing();
-    this.callbacks.onPlay(this.selectedMode, ld, mapId);
+    this.callbacks.onPlay({
+      mode: this.selectedMode,
+      loadout: ld,
+      mapId,
+      partyType: 'solo',
+      displayName: this.profile.displayName,
+    });
+  }
+
+  showMatchmakingOverlay(show) {
+    this.el.matchmakingOverlay?.classList.toggle('hidden', !show);
+  }
+
+  updateMatchmakingUI(status) {
+    if (!status) return;
+    const { count, min, max, players, phase } = status;
+    if (this.el.mmStatus) {
+      this.el.mmStatus.textContent =
+        phase === 'found'
+          ? 'Собираем отряд...'
+          : count < min
+            ? `Ищем игроков… нужно минимум ${min}`
+            : `Набор отряда… ждём до ${max} игроков`;
+    }
+    if (this.el.mmCount) {
+      this.el.mmCount.textContent = `${count} / ${max}`;
+    }
+    if (this.el.mmRoster) {
+      this.el.mmRoster.innerHTML = (players || [])
+        .map(
+          (p) =>
+            `<li class="${p.uid === this.auth.getUid() ? 'mm-you' : ''}">${p.displayName || 'Оператор'}${p.uid === this.auth.getUid() ? ' (ты)' : ''}</li>`
+        )
+        .join('');
+    }
+  }
+
+  async startMatchmaking(loadout, db) {
+    this.pendingLoadout = loadout;
+    this.showMatchmakingOverlay(true);
+    this.updateMatchmakingUI({ phase: 'searching', count: 1, min: 2, max: 4, players: [{ uid: this.auth.getUid(), displayName: this.profile.displayName }] });
+
+    if (this.matchmaking) await this.matchmaking.cancel();
+
+    this.matchmaking = new Matchmaking(db, {
+      uid: this.auth.getUid(),
+      displayName: this.profile.displayName,
+    });
+
+    this.matchmaking.onStatus = (status) => this.updateMatchmakingUI(status);
+    this.matchmaking.onError = (e) => {
+      console.error(e);
+      const msg =
+        e?.code === 'permission-denied'
+          ? 'Нет доступа к очереди. Обновите правила Firestore.'
+          : e?.message || 'Ошибка поиска игроков';
+      this.flash(msg);
+      this.cancelMatchmaking();
+    };
+    this.matchmaking.onReady = async (match) => {
+      this.updateMatchmakingUI({ phase: 'found', count: match.players.length, min: 2, max: 4, players: match.players });
+      await this.launchMultiplayerRaid(match);
+    };
+
+    try {
+      await this.matchmaking.search(this.selectedMap, this.selectedMode);
+    } catch (e) {
+      this.matchmaking.onError(e);
+    }
+  }
+
+  async cancelMatchmaking() {
+    if (this.matchmaking) {
+      await this.matchmaking.cancel();
+      this.matchmaking = null;
+    }
+    this.pendingLoadout = null;
+    this.showMatchmakingOverlay(false);
+  }
+
+  async launchMultiplayerRaid(match) {
+    const ld = this.pendingLoadout;
+    if (!ld) return;
+
+    this.profile = {
+      ...this.profile,
+      loadout: emptyLoadout(),
+    };
+    if (!this.auth.isGuest()) await this.persistProfile(null);
+
+    this.showMatchmakingOverlay(false);
+    this.matchmaking = null;
+    this.pendingLoadout = null;
+
+    this.callbacks.onPlay({
+      mode: match.mode,
+      loadout: ld,
+      mapId: match.mapId,
+      partyType: 'multi',
+      matchId: match.matchId,
+      uid: this.auth.getUid(),
+      players: match.players,
+      displayName: this.profile.displayName,
+    });
   }
 
   renderStash() {
@@ -628,12 +794,20 @@ export class Lobby {
       this.selectedMode === 'boss'
         ? 'Босс + Scav'
         : `Scav × ${map.scavCount || 5}`;
+    const party = PARTY_TYPES[this.playType];
+    const pvpNote =
+      this.playType === 'multi' ? '<div class="briefing-row"><span class="briefing-label">PvP</span><span class="briefing-value warn">Можно убивать игроков и лутать трупы · при смерти лут теряется</span></div>' : '';
 
     this.el.briefing.innerHTML = `
       <div class="briefing-title">БРИФИНГ РЕЙДА</div>
       <div class="briefing-row">
+        <span class="briefing-label">Тип</span>
+        <span class="briefing-value">${party.name}${this.playType === 'multi' ? ' · 2–4 игрока' : ''}</span>
+      </div>
+      ${pvpNote}
+      <div class="briefing-row">
         <span class="briefing-label">Карта</span>
-        <span class="briefing-value">${map.name} · ${map.timeLabel} · случайно при старте</span>
+        <span class="briefing-value">${map.name} · ${map.timeLabel}${this.playType === 'solo' ? ' · случайно при старте' : ''}</span>
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Режим</span>
@@ -656,9 +830,12 @@ export class Lobby {
 
   updateDeployBtn() {
     if (!this.el.deployBtn) return;
-    const map = getMapById(this.selectedMap);
     const mode = RAID_MODES[this.selectedMode];
-    this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">случайная карта · ${this.formatDuration(mode.duration)}</span>`;
+    if (this.playType === 'multi') {
+      this.el.deployBtn.innerHTML = `НАЙТИ ИГРУ<span class="deploy-btn-sub">${getMapById(this.selectedMap).name} · ${this.formatDuration(mode.duration)} · 2–4 игрока</span>`;
+    } else {
+      this.el.deployBtn.innerHTML = `В РЕЙД<span class="deploy-btn-sub">случайная карта · ${this.formatDuration(mode.duration)}</span>`;
+    }
   }
 
   render() {

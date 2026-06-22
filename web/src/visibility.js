@@ -4,6 +4,9 @@ export const VISION_COVERAGE_CRITICAL = 0.32;
 export const CRITICAL_HP_RATIO = 0.2;
 /** −20% к радиусу от базовой формулы, затем +12.5% к итоговому размеру */
 export const VISION_RADIUS_SCALE = 0.9;
+/** Дальность обзора и стрельбы NPC относительно радиуса зрения игрока */
+export const NPC_VISION_PLAYER_RATIO = 0.8;
+export const NPC_BOSS_VISION_BONUS = 1.1;
 
 /** @param {object} baseTheme @param {number} viewW @param {number} viewH @param {number} [hpRatio] */
 export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
@@ -16,6 +19,16 @@ export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {
     coneRange: r,
     coneAngle: Math.PI,
   };
+}
+
+/** @param {number} viewW @param {number} viewH @param {number} [hpRatio] @param {object} [baseTheme] */
+export function playerVisionRadius(viewW, viewH, hpRatio = 1, baseTheme = {}) {
+  return buildVisionTheme(baseTheme, viewW, viewH, hpRatio).visionRadius;
+}
+
+/** @param {number} playerRadius @param {boolean} [isBoss] */
+export function npcVisionRadius(playerRadius, isBoss = false) {
+  return playerRadius * NPC_VISION_PLAYER_RATIO * (isBoss ? NPC_BOSS_VISION_BONUS : 1);
 }
 
 /** Вырезает дыру обзора в чёрном тумане */

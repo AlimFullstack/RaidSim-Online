@@ -168,6 +168,11 @@ export class AuthService {
   }
 }
 
+export function getFirestoreDb() {
+  if (!ensureFirebase()) return null;
+  return db;
+}
+
 export class ProfileStorage {
   constructor(authService) {
     this.auth = authService;

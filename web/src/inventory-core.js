@@ -22,8 +22,9 @@ export function itemsMatch(a, b) {
 }
 
 /** @param {object} item @param {number} [count] */
-export function normalizeItem(item, count = 1) {
-  const c = Math.max(1, count || item.count || 1);
+export function normalizeItem(item, count) {
+  const base = count !== undefined ? count : (item.count ?? 1);
+  const c = Math.max(1, base);
   return { ...item, count: isStackable(item) ? c : 1 };
 }
 
@@ -50,6 +51,12 @@ export function emptyLoadout() {
   return { hotbar: emptyHotbar(), backpack: emptyBackpack(), equipped: emptyEquipped() };
 }
 
+/** @param {(object|null)[]} arr @param {number} size */
+function ensureSlotArrayInPlace(arr, size) {
+  while (arr.length < size) arr.push(null);
+  if (arr.length > size) arr.length = size;
+}
+
 /** @param {(object|null)[]|undefined} slots @param {number} size */
 function padSlots(slots, size) {
   const out = [...(slots || [])];
@@ -59,20 +66,24 @@ function padSlots(slots, size) {
 
 /** @param {object} loadout */
 export function normalizeLoadout(loadout = {}) {
-  const oldBp = loadout.backpack;
-  let hotbar = padSlots(loadout.hotbar, HOTBAR_SIZE);
-  let backpack = padSlots(loadout.backpack, BACKPACK_SIZE);
+  const target = loadout && typeof loadout === 'object' ? loadout : {};
+  const oldBp = target.backpack;
+  const missingHotbar = target.hotbar == null;
 
-  if (!loadout.hotbar && Array.isArray(oldBp) && oldBp.length <= 4) {
-    backpack = padSlots(oldBp, BACKPACK_SIZE);
-    hotbar = emptyHotbar();
+  if (!Array.isArray(target.hotbar)) target.hotbar = [];
+  if (!Array.isArray(target.backpack)) target.backpack = [];
+
+  if (missingHotbar && Array.isArray(oldBp) && oldBp.length <= 4) {
+    ensureSlotArrayInPlace(target.backpack, BACKPACK_SIZE);
+    target.hotbar = emptyHotbar();
+  } else {
+    ensureSlotArrayInPlace(target.hotbar, HOTBAR_SIZE);
+    ensureSlotArrayInPlace(target.backpack, BACKPACK_SIZE);
   }
 
-  return {
-    hotbar,
-    backpack,
-    equipped: cloneEquipped(loadout.equipped || {}),
-  };
+  if (!target.equipped) target.equipped = emptyEquipped();
+
+  return target;
 }
 
 /** @param {'hotbar'|'backpack'} zone @param {object} loadout */
@@ -178,13 +189,21 @@ export function removeFromBackpack(slots, index, count = 1) {
 /** @param {object} loadout @param {object} item @param {number} [count] */
 export function addToLoadout(loadout, item, count = 1) {
   const ld = normalizeLoadout(loadout);
-  loadout.hotbar = ld.hotbar;
-  loadout.backpack = ld.backpack;
-  loadout.equipped = ld.equipped;
-  let r = addToBackpack(loadout.backpack, item, count);
-  if (r.ok) return { ...r, zone: 'backpack', loadout };
-  r = addToBackpack(loadout.hotbar, item, count);
-  if (r.ok) return { ...r, zone: 'hotbar', loadout };
+  const n = normalizeItem(item, count);
+  if (isStackable(n)) {
+    for (const zone of ['backpack', 'hotbar']) {
+      const slots = getLoadoutZone(ld, zone);
+      const idx = slots.findIndex((s) => s && itemsMatch(s, n));
+      if (idx >= 0) {
+        slots[idx] = { ...slots[idx], count: slots[idx].count + n.count };
+        return { ok: true, zone, slot: idx, loadout: ld, msg: `В слот: ${n.name} ×${n.count}` };
+      }
+    }
+  }
+  let r = addToBackpack(ld.backpack, item, count);
+  if (r.ok) return { ...r, zone: 'backpack', loadout: ld };
+  r = addToBackpack(ld.hotbar, item, count);
+  if (r.ok) return { ...r, zone: 'hotbar', loadout: ld };
   return { ok: false, msg: 'Рюкзак и панель полны' };
 }
 
@@ -211,6 +230,16 @@ export function moveStashToLoadout(profile, stashIdx, zone, slotIdx, count = 1) 
   const targetSlots = getLoadoutZone(p.loadout, zone);
   const target = targetSlots[slotIdx];
   if (!target) {
+    if (isStackable(removed.item)) {
+      for (const mergeZone of ['backpack', 'hotbar']) {
+        const slots = getLoadoutZone(p.loadout, mergeZone);
+        const idx = slots.findIndex((s) => s && itemsMatch(s, removed.item));
+        if (idx >= 0) {
+          slots[idx] = { ...slots[idx], count: slots[idx].count + removed.item.count };
+          return { ok: true, profile: p, msg: `Взято: ${removed.item.name}` };
+        }
+      }
+    }
     targetSlots[slotIdx] = removed.item;
     return { ok: true, profile: p, msg: `Взято: ${removed.item.name}` };
   }
@@ -243,8 +272,15 @@ export function swapLoadoutSlots(loadout, fromZone, fromIdx, toZone, toIdx) {
   const fromSlots = getLoadoutZone(ld, fromZone);
   const toSlots = getLoadoutZone(ld, toZone);
   if (fromZone === toZone && fromIdx === toIdx) return { ok: false, msg: 'Тот же слот' };
-  const tmp = toSlots[toIdx];
-  toSlots[toIdx] = fromSlots[fromIdx];
+  const fromItem = fromSlots[fromIdx];
+  const toItem = toSlots[toIdx];
+  if (fromItem && toItem && itemsMatch(fromItem, toItem)) {
+    toSlots[toIdx] = { ...toItem, count: toItem.count + fromItem.count };
+    fromSlots[fromIdx] = null;
+    return { ok: true, loadout: ld, msg: `Сложено: ${toItem.name}` };
+  }
+  const tmp = toItem;
+  toSlots[toIdx] = fromItem;
   fromSlots[fromIdx] = tmp;
   return { ok: true, loadout: ld, msg: 'Перемещено' };
 }
@@ -445,7 +481,7 @@ export function collectRaidLoot(loadout) {
   }
   if (ld.equipped.weapon) loot.push(cloneItem(ld.equipped.weapon));
   if (ld.equipped.armor) loot.push(cloneItem(ld.equipped.armor));
-  return loot;
+  return stackItems(loot);
 }
 
 /** @param {object[]} loot */
