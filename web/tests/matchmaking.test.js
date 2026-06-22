@@ -70,10 +70,21 @@ describe('matchmaking helpers', () => {
 
   it('getMatchmakingPhase uses countdown after minimum players', () => {
     const two = [{ uid: 'a' }, { uid: 'b' }];
+    const three = [{ uid: 'a' }, { uid: 'b' }, { uid: 'c' }];
     expect(getMatchmakingPhase(two, 0)).toBe('waiting');
     expect(getMatchmakingPhase(two, 40000, 10000)).toBe('countdown');
+    expect(getMatchmakingPhase(three, 40000, 10000)).toBe('countdown');
     expect(getMatchmakingPhase(two, 5000, 10000)).toBe('starting');
     const four = new Array(4).fill({ uid: 'x' });
     expect(getMatchmakingPhase(four, 0)).toBe('full');
+  });
+
+  it('selectPlayersForMatch includes third player during countdown window', () => {
+    const three = [
+      { uid: 'a', joinedAt: 1 },
+      { uid: 'b', joinedAt: 2 },
+      { uid: 'c', joinedAt: 3 },
+    ];
+    expect(selectPlayersForMatch(three)).toHaveLength(3);
   });
 });

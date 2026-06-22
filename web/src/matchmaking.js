@@ -4,6 +4,7 @@ import {
   onSnapshot,
   setDoc,
   deleteDoc,
+  getDoc,
   runTransaction,
   getDocs,
 } from 'firebase/firestore';
@@ -94,6 +95,7 @@ export class Matchmaking {
       if (!snap.exists() || this.cancelled) return;
       const data = snap.data();
       if (!data?.matchId) return;
+      this.forming = false;
       this.cleanupQueueOnly();
       this.onReady?.({
         matchId: data.matchId,
@@ -108,26 +110,16 @@ export class Matchmaking {
 
     this.unsubMeta = onSnapshot(metaRef, (snap) => {
       if (this.cancelled) return;
-      const deadline = snap.data()?.fillDeadline || 0;
-      if (deadline) this.fillDeadline = deadline;
-      else if (this.lastPlayers.length < MIN_PLAYERS) this.fillDeadline = 0;
+      if (snap.exists() && snap.data()?.fillDeadline) {
+        this.fillDeadline = snap.data().fillDeadline;
+      }
       if (this.lastPlayers.length) this.emitStatus(this.lastPlayers);
     });
 
     this.unsubQueue = onSnapshot(waitingCol, (snap) => {
       if (this.cancelled) return;
       const players = snap.docs.map((d) => d.data());
-      this.emitStatus(players);
-
-      if (players.length >= MIN_PLAYERS && isQueueLeader(players, this.uid)) {
-        void this.scheduleFill(players);
-      } else if (players.length < MIN_PLAYERS) {
-        this.clearFillTimer();
-        this.fillDeadline = 0;
-        if (isQueueLeader(players, this.uid)) {
-          deleteDoc(metaRef).catch(() => {});
-        }
-      }
+      void this.onQueueUpdate(players, metaRef);
     });
 
     this.startCountdownTick();
@@ -138,13 +130,39 @@ export class Matchmaking {
     this.tickTimer = setInterval(() => {
       if (this.cancelled || !this.fillDeadline || this.lastPlayers.length < MIN_PLAYERS) return;
       this.emitStatus(this.lastPlayers);
-      if (
-        isQueueLeader(this.lastPlayers, this.uid) &&
-        shouldFormMatch(this.lastPlayers, this.fillDeadline)
-      ) {
-        void this.tryFormMatch(this.lastPlayers);
+      if (isQueueLeader(this.lastPlayers, this.uid) && shouldFormMatch(this.lastPlayers, this.fillDeadline)) {
+        void this.tryFormMatch();
       }
     }, 1000);
+  }
+
+  async onQueueUpdate(players, metaRef) {
+    if (players.length >= MIN_PLAYERS && !this.fillDeadline) {
+      await this.syncFillDeadline(metaRef);
+    }
+
+    this.emitStatus(players);
+
+    if (players.length >= MIN_PLAYERS && isQueueLeader(players, this.uid)) {
+      await this.scheduleFill(players);
+    } else if (players.length < MIN_PLAYERS) {
+      this.clearFillTimer();
+      this.fillDeadline = 0;
+      if (isQueueLeader(players, this.uid)) {
+        deleteDoc(metaRef).catch(() => {});
+      }
+    }
+  }
+
+  async syncFillDeadline(metaRef) {
+    try {
+      const snap = await getDoc(metaRef);
+      if (snap.exists() && snap.data()?.fillDeadline) {
+        this.fillDeadline = snap.data().fillDeadline;
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   clearCountdownTick() {
@@ -198,7 +216,7 @@ export class Matchmaking {
     }
 
     if (shouldFormMatch(players, this.fillDeadline)) {
-      await this.tryFormMatch(players);
+      await this.tryFormMatch();
       return;
     }
 
@@ -207,26 +225,31 @@ export class Matchmaking {
       this.fillTimer = setTimeout(() => {
         this.fillTimer = null;
         if (this.cancelled || this.forming) return;
-        getDocs(collection(this.db, 'matchQueues', this.queueKey, 'waiting'))
-          .then((snap) => {
-            const fresh = snap.docs.map((d) => d.data());
-            if (isQueueLeader(fresh, this.uid) && shouldFormMatch(fresh, this.fillDeadline)) {
-              void this.tryFormMatch(fresh);
-            }
-          })
-          .catch((e) => this.onError?.(e));
+        void this.tryFormMatch();
       }, wait + 50);
     }
   }
 
-  async tryFormMatch(players) {
+  async fetchWaitingPlayers() {
+    const snap = await getDocs(collection(this.db, 'matchQueues', this.queueKey, 'waiting'));
+    return sortQueuePlayers(snap.docs.map((d) => d.data()));
+  }
+
+  async tryFormMatch() {
     if (this.forming || this.cancelled) return;
-    const picked = selectPlayersForMatch(players);
+
+    const allPlayers = await this.fetchWaitingPlayers();
+    if (allPlayers.length < MIN_PLAYERS) return;
+    if (!isQueueLeader(allPlayers, this.uid)) return;
+    if (!shouldFormMatch(allPlayers, this.fillDeadline)) return;
+
+    const picked = selectPlayersForMatch(allPlayers);
     if (picked.length < MIN_PLAYERS) return;
 
     this.forming = true;
     this.clearFillTimer();
 
+    let matched = false;
     try {
       const matchId = crypto.randomUUID();
       const mapId = pickRandomMapId();
@@ -240,7 +263,6 @@ export class Matchmaking {
         }
         const livePicked = selectPlayersForMatch(verified);
         if (livePicked.length < MIN_PLAYERS) return;
-        if (!livePicked.some((p) => p.uid === this.uid)) return;
         if (livePicked[0].uid !== this.uid) return;
 
         const finalPlayers = livePicked.map((p, i) => ({
@@ -270,10 +292,12 @@ export class Matchmaking {
           tx.delete(doc(this.db, 'matchQueues', this.queueKey, 'waiting', p.uid));
         }
         tx.delete(doc(this.db, 'matchQueues', this.queueKey, 'meta', 'state'));
+        matched = true;
       });
     } catch (e) {
-      this.forming = false;
       this.onError?.(e);
+    } finally {
+      if (!matched) this.forming = false;
     }
   }
 

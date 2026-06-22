@@ -467,7 +467,13 @@ export class Lobby {
       } else if (phase === 'full') {
         this.el.mmStatus.textContent = 'Отряд полон — старт!';
       } else if (phase === 'countdown' && countdownSec > 0) {
-        this.el.mmStatus.textContent = `Старт через ${countdownSec} сек · можно присоединиться ещё ${max - count}`;
+        const slotsLeft = Math.max(0, max - count);
+        this.el.mmStatus.textContent =
+          slotsLeft > 0
+            ? `Старт через ${countdownSec} сек · можно присоединиться ещё ${slotsLeft}`
+            : `Старт через ${countdownSec} сек`;
+      } else if (count >= min && phase === 'waiting') {
+        this.el.mmStatus.textContent = 'Синхронизация отсчёта...';
       } else {
         this.el.mmStatus.textContent = 'Набираем отряд...';
       }
