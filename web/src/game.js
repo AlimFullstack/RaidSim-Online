@@ -13,7 +13,7 @@ import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius } from './visibility.js';
+import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius, SPREAD_CONE_VISION_RATIO } from './visibility.js';
 import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
@@ -289,16 +289,28 @@ export class Game {
         }
       }
 
-      const reloading = p.reloadTime > 0;
+      const reloadingBefore = p.reloadTime > 0;
       if (this.input.tapped('KeyR') && p.ammo < p.magSize && p.reserve > 0 && p.reloadTime <= 0) {
         this.audio?.play('reload');
         this.fx.floatText(p.x, p.y - 24, 'Перезарядка…', '#f5e6a8');
       }
-      if (this.wasReloading && !reloading && p.ammo > 0) this.audio?.play('reloadDone');
-      this.wasReloading = reloading;
+
+      const viewW = this.canvas.width / this.scale;
+      const viewH = this.canvas.height / this.scale;
+      const mapTheme = getMapTheme(this.activeMap?.theme);
+      const pVisionR = playerVisionRadius(viewW, viewH, p.hp / p.maxHp, mapTheme);
+      p.coneRange = pVisionR * SPREAD_CONE_VISION_RATIO;
+      const autoFire = !p.isMoving && !!this.findAutoFireTarget(p, pVisionR);
+
+      const shot = p.update(this.input, dt, combat, { autoFire, autoReload: true });
+      if (!reloadingBefore && p.reloadTime > 0 && !this.input.tapped('KeyR')) {
+        this.audio?.play('reload');
+        this.fx.floatText(p.x, p.y - 24, 'Перезарядка…', '#f5e6a8');
+      }
+      if (this.wasReloading && p.reloadTime <= 0 && p.ammo > 0) this.audio?.play('reloadDone');
+      this.wasReloading = p.reloadTime > 0;
 
       const movedBefore = { x: p.x, y: p.y };
-      const shot = p.update(this.input, dt, combat);
       if (p.x !== movedBefore.x || p.y !== movedBefore.y) {
         this.playerMoving = true;
         if (p.isSprinting) this.fx.footDust(p.x, p.y);
@@ -441,6 +453,55 @@ export class Game {
     );
     return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme)
       && !isBlockedBySmoke(p.x, p.y, wx, wy, this.smokeZones);
+  }
+
+  /** Цель в конусе разброса: видимость, LOS, дистанция ≤ 90% радиуса обзора */
+  findAutoFireTarget(p, visionRadius) {
+    if (!p.canShoot() || p.dead || !this.activeMap) return null;
+
+    const coneRange = visionRadius * SPREAD_CONE_VISION_RATIO;
+    const spread = p.getSpreadAngle();
+    const walls = this.activeMap.walls;
+    const viewW = this.canvas.width / this.scale;
+    const viewH = this.canvas.height / this.scale;
+    const theme = buildVisionTheme(
+      getMapTheme(this.activeMap.theme),
+      viewW,
+      viewH,
+      p.hp / p.maxHp
+    );
+
+    const targets = [];
+    for (const scav of this.scavs) {
+      if (!scav.dead) targets.push({ x: scav.x, y: scav.y });
+    }
+    if (this.multiplayer) {
+      for (const rp of this.multiplayer.values()) {
+        if (!rp.dead) targets.push({ x: rp.x, y: rp.y });
+      }
+    }
+
+    let best = null;
+    let bestDist = Infinity;
+    for (const t of targets) {
+      const d = dist(p.x, p.y, t.x, t.y);
+      if (d > coneRange) continue;
+
+      const aim = Math.atan2(t.y - p.y, t.x - p.x);
+      let delta = aim - p.angle;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      if (Math.abs(delta) > spread) continue;
+
+      if (!canSeePoint(p.x, p.y, t.x, t.y, p.angle, walls, theme)) continue;
+      if (isBlockedBySmoke(p.x, p.y, t.x, t.y, this.smokeZones)) continue;
+
+      if (d < bestDist) {
+        best = t;
+        bestDist = d;
+      }
+    }
+    return best;
   }
 
   updateThrownGrenades(dt) {

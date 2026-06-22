@@ -7,6 +7,8 @@ export const VISION_RADIUS_SCALE = 0.9;
 /** Дальность обзора и стрельбы NPC относительно радиуса зрения игрока */
 export const NPC_VISION_PLAYER_RATIO = 0.8;
 export const NPC_BOSS_VISION_BONUS = 1.1;
+/** Длина конуса разброса / авто-стрельбы относительно радиуса видимости */
+export const SPREAD_CONE_VISION_RATIO = 0.9;
 
 /** @param {object} baseTheme @param {number} viewW @param {number} viewH @param {number} [hpRatio] */
 export function buildVisionTheme(baseTheme, viewW, viewH, hpRatio = 1) {

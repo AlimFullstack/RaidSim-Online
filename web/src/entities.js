@@ -307,6 +307,7 @@ export class Player extends Entity {
     this.recoilHeat = 0;
     this.currentSpread = 0;
     this.fireBlockedReason = '';
+    this.coneRange = 0;
   }
 
   initRaidInventory(loadout = {}) {
@@ -653,7 +654,8 @@ export class Player extends Entity {
   }
 
   /** @returns {Bullet[]|null} */
-  update(input, dt, combat = true) {
+  update(input, dt, combat = true, opts = {}) {
+    const { autoFire = false, autoReload = false } = opts;
     if (this.dead) return null;
 
     let dx = 0;
@@ -665,7 +667,8 @@ export class Player extends Entity {
 
     this.isMoving = !!(dx || dy);
     this.isSprinting = (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving;
-    this.isFiring = combat && this.canShoot() && input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
+    this.isFiring =
+      combat && this.canShoot() && (input.mouse.down || autoFire) && this.ammo > 0 && this.reloadTime <= 0;
 
     const baseSpeed = this.isSprinting ? 180 : 126;
     const shootSlow = this.isFiring || this.fireCooldown > this.getEffectiveFireRate() * 0.4;
@@ -712,8 +715,25 @@ export class Player extends Entity {
       }
     }
 
+    if (
+      autoReload &&
+      combat &&
+      this.canShoot() &&
+      this.ammo <= 0 &&
+      this.reloadTime <= 0 &&
+      !input.tapped('KeyR')
+    ) {
+      if (this.reserve <= 0) this.reserve += this.pullAmmoFromBackpack(this.magSize);
+      if (this.reserve > 0) {
+        this.reloadDuration = this.weaponDef?.reloadTime || 1.4;
+        this.reloadTime = this.reloadDuration;
+      }
+    }
+
     const w = this.weaponDef || getWeapon(this.weaponId);
-    const trigger = w.semiAuto ? input.mouse.justDown : input.mouse.down;
+    const manualTrigger = w.semiAuto ? input.mouse.justDown : input.mouse.down;
+    const autoTrigger = autoFire && this.fireCooldown <= 0 && this.ammo > 0;
+    const trigger = w.semiAuto ? manualTrigger || autoTrigger : manualTrigger || autoFire;
     this.fireBlockedReason = '';
 
     if (combat && this.canShoot() && trigger && this.fireCooldown <= 0 && this.ammo > 0) {
@@ -855,18 +875,24 @@ export class Player extends Entity {
   drawSpreadCone(ctx) {
     if (!this.canShoot() || this.isMoving) return;
     const spread = this.currentSpread;
-    if (spread < 0.02 || spread > 0.08) return;
+    if (spread <= 0) return;
 
-    const range = 120;
+    const range = this.coneRange > 0 ? this.coneRange : 120;
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    ctx.fillStyle = 'rgba(138, 154, 122, 0.04)';
+    ctx.fillStyle = 'rgba(138, 154, 122, 0.05)';
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.arc(0, 0, range, -spread, spread);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = 'rgba(138, 154, 122, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, range, -spread, spread);
+    ctx.stroke();
     ctx.restore();
   }
 }
