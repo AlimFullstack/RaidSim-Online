@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { applyRaidResult, sellStashItem, createDefaultProfile } from '../src/profile.js';
+import { applyRaidResult, sellStashItem, createDefaultProfile, createBetaTestLoadout, ensureMigratedProfile } from '../src/profile.js';
+import { loadoutHasWeapon } from '../src/inventory-core.js';
 
 describe('profile extract and sell', () => {
   it('extract stashes loot without granting rubles', () => {
@@ -28,6 +29,41 @@ describe('profile extract and sell', () => {
     expect(r.ok).toBe(true);
     expect(r.profile.rubles).toBe(24);
     expect(r.profile.stash.items).toHaveLength(0);
+  });
+
+  it('createBetaTestLoadout has ak, armor, ammo and bandages', () => {
+    const ld = createBetaTestLoadout();
+    expect(ld.equipped.weapon?.weapon).toBe('ak');
+    expect(ld.equipped.armor?.armor).toBe(25);
+    expect(ld.backpack.filter(Boolean)).toHaveLength(1);
+    expect(ld.hotbar.filter(Boolean)).toHaveLength(3);
+    expect(loadoutHasWeapon(ld)).toBe(true);
+  });
+
+  it('betatest does not change profile on extract', () => {
+    const profile = createDefaultProfile({
+      rubles: 50,
+      loadout: {
+        hotbar: [{ id: 'pm', name: 'ПМ', weapon: 'pm', value: 1 }],
+        backpack: [],
+        equipped: { weapon: null, armor: null },
+      },
+      stash: { items: [{ id: 'coin', name: 'Монета', value: 1, count: 1 }] },
+      quests: { active: null, completed: [] },
+    });
+    const before = ensureMigratedProfile(profile);
+    const p = applyRaidResult(profile, {
+      type: 'extracted',
+      mode: 'betatest',
+      sandbox: true,
+      kills: 3,
+      loot: [{ id: 'gpu', name: 'GPU', value: 99, count: 1 }],
+    });
+    expect(p.rubles).toBe(before.rubles);
+    expect(p.stash.items).toEqual(before.stash.items);
+    expect(p.loadout.hotbar[0]?.weapon).toBe(before.loadout.hotbar[0]?.weapon);
+    expect(p.stats.raids).toBe(before.stats.raids);
+    expect(p.stats.kills).toBe(before.stats.kills);
   });
 
   it('sellStashItem rejects zero-value consumables', () => {

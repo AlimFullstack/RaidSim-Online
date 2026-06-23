@@ -655,7 +655,7 @@ export class Player extends Entity {
 
   /** @returns {Bullet[]|null} */
   update(input, dt, combat = true, opts = {}) {
-    const { autoFire = false, autoReload = false } = opts;
+    const { autoFire = false, autoReload = false, autoAimAngle = null } = opts;
     if (this.dead) return null;
 
     let dx = 0;
@@ -682,6 +682,7 @@ export class Player extends Entity {
     this.currentSpread = this.getSpreadAngle();
 
     this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
+    if (autoFire && autoAimAngle != null) this.angle = autoAimAngle;
 
     for (let i = 0; i < this.maxInv; i++) {
       if (input.tapped(`Digit${i + 1}`)) this.selectSlot(i);
@@ -732,7 +733,7 @@ export class Player extends Entity {
 
     const w = this.weaponDef || getWeapon(this.weaponId);
     const manualTrigger = w.semiAuto ? input.mouse.justDown : input.mouse.down;
-    const autoTrigger = autoFire && this.fireCooldown <= 0 && this.ammo > 0;
+    const autoTrigger = autoFire && this.ammo > 0;
     const trigger = w.semiAuto ? manualTrigger || autoTrigger : manualTrigger || autoFire;
     this.fireBlockedReason = '';
 

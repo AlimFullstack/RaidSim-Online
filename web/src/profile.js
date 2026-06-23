@@ -15,6 +15,13 @@ export const RAID_MODES = {
   standard: { id: 'standard', name: 'Стандарт', duration: 5 * 60, desc: '5 минут, полный лут' },
   quick: { id: 'quick', name: 'Быстрый', duration: 2 * 60, desc: '2 минуты, +20% XP' },
   boss: { id: 'boss', name: 'Босс-рейд', duration: 6 * 60, desc: '6 минут, босс в центре, редкий лут' },
+  betatest: {
+    id: 'betatest',
+    name: 'Бета-тест',
+    duration: 5 * 60,
+    desc: 'Песочница: фикс. набор, лут не сохраняется',
+    sandbox: true,
+  },
 };
 
 export const PARTY_TYPES = {
@@ -23,9 +30,29 @@ export const PARTY_TYPES = {
 };
 
 export const MODES_BY_PARTY = {
-  solo: ['quick', 'boss'],
+  solo: ['quick', 'boss', 'betatest'],
   multi: ['standard', 'boss'],
 };
+
+export function isSandboxMode(mode) {
+  return mode === 'betatest' || !!RAID_MODES[mode]?.sandbox;
+}
+
+/** Фиксированный набор для режима бета-тест */
+export function createBetaTestLoadout() {
+  return normalizeLoadout({
+    equipped: {
+      weapon: { id: 'beta_ak', name: 'АК-74', weapon: 'ak', value: 20 },
+      armor: { id: 'beta_armor', name: 'Бронежилет', armor: 25, value: 8 },
+    },
+    hotbar: [
+      { id: 'beta_med1', name: 'Бинт', heal: 50, consumable: true, value: 0 },
+      { id: 'beta_med2', name: 'Бинт', heal: 50, consumable: true, value: 0 },
+      { id: 'beta_med3', name: 'Бинт', heal: 50, consumable: true, value: 0 },
+    ],
+    backpack: [{ id: 'beta_ammo', name: 'Патроны', ammo: 18, value: 0, count: 1 }],
+  });
+}
 
 export function getModesForParty(partyType) {
   const ids = MODES_BY_PARTY[partyType] || MODES_BY_PARTY.solo;
@@ -77,6 +104,10 @@ export function createDefaultProfile(overrides = {}) {
 }
 
 export function applyRaidResult(profile, result) {
+  if (isSandboxMode(result.mode) || result.sandbox) {
+    return ensureMigratedProfile(profile);
+  }
+
   let p = ensureMigratedProfile({
     ...profile,
     stash: { items: [...profile.stash.items] },

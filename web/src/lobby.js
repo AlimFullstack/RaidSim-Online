@@ -11,6 +11,8 @@ import {
   applyRaidResult,
   getSurvivalRate,
   ensureMigratedProfile,
+  createBetaTestLoadout,
+  isSandboxMode,
 } from './profile.js';
 import { pickRandomMapId } from './map-loader.js';
 import { pickRandomQuest, QUEST_POOL } from './quests.js';
@@ -22,7 +24,7 @@ import { Matchmaking } from './matchmaking.js';
 import { getFirestoreDb } from './auth.js';
 
 const SHOP_ICONS = { pm: '🔫', pp: '🔫', medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
-const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀' };
+const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀', betatest: '🧪' };
 
 export class Lobby {
   constructor(auth, storage, callbacks) {
@@ -378,6 +380,11 @@ export class Lobby {
 
   async onRaidEnd(result) {
     if (!this.profile) return;
+    if (isSandboxMode(result.mode) || result.sandbox) {
+      this.flash('Бета-тест: инвентарь и схрон не изменились');
+      this.showLobby();
+      return;
+    }
     const questId = this.profile.quests?.active?.id;
     const stashBefore = this.profile.stash?.items?.length || 0;
     const rublesBefore = this.profile.rubles || 0;
@@ -417,8 +424,9 @@ export class Lobby {
 
   async play() {
     if (!this.profile) return;
+    const isBeta = this.selectedMode === 'betatest';
     const ld = normalizeLoadout(this.profile.loadout || {});
-    if (!loadoutHasWeapon(ld)) {
+    if (!isBeta && !loadoutHasWeapon(ld)) {
       this.flash('Надень оружие на персонажа или положи в рюкзак');
       return;
     }
@@ -434,6 +442,19 @@ export class Lobby {
         return;
       }
       await this.startMatchmaking(ld, db);
+      return;
+    }
+
+    if (isBeta) {
+      const mapId = pickRandomMapId();
+      this.callbacks.onPlay({
+        mode: 'betatest',
+        loadout: createBetaTestLoadout(),
+        mapId,
+        partyType: 'solo',
+        sandbox: true,
+        displayName: this.profile.displayName,
+      });
       return;
     }
 
@@ -769,8 +790,19 @@ export class Lobby {
       }
     }
 
-    const threat = this.selectedMode === 'boss' ? 'Босс + Scav' : 'Scav на карте';
+    const threat =
+      this.selectedMode === 'boss' ? 'Босс + Scav' : 'Scav на карте — как в стандартном рейде';
     const party = PARTY_TYPES[this.playType];
+    const betaNote =
+      this.selectedMode === 'betatest'
+        ? '<div class="briefing-row"><span class="briefing-label">Песочница</span><span class="briefing-value warn">Лут не сохраняется · инвентарь до рейда не трогаем</span></div>'
+        : '';
+    const loadoutLine =
+      this.selectedMode === 'betatest'
+        ? 'АК-74, броня, патроны ×1, бинты ×3'
+        : equipParts.length
+          ? equipParts.join(', ')
+          : 'Нет оружия — рейд недоступен';
     const pvpNote =
       this.playType === 'multi' ? '<div class="briefing-row"><span class="briefing-label">PvP</span><span class="briefing-value warn">Можно убивать игроков и лутать трупы · при смерти лут теряется</span></div>' : '';
 
@@ -781,6 +813,7 @@ export class Lobby {
         <span class="briefing-value">${party.name}${this.playType === 'multi' ? ' · 2–4 игрока' : ''}</span>
       </div>
       ${pvpNote}
+      ${betaNote}
       <div class="briefing-row">
         <span class="briefing-label">Карта</span>
         <span class="briefing-value">Случайная при старте</span>
@@ -795,7 +828,7 @@ export class Lobby {
       </div>
       <div class="briefing-row">
         <span class="briefing-label">Рюкзак</span>
-        <span class="briefing-value">${equipParts.length ? equipParts.join(', ') : 'Нет оружия — рейд недоступен'}</span>
+        <span class="briefing-value">${loadoutLine}</span>
       </div>
     `;
   }

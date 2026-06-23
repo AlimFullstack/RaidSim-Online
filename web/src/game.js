@@ -8,12 +8,12 @@ import {
 } from './map-core.js';
 import { loadMap } from './map-loader.js';
 import { Input, Player, Scav, Bullet, LootPoint, PlayerCorpse, SmokeZone, GroundItem, ThrownGrenade, drawMap } from './entities.js';
-import { RAID_MODES } from './profile.js';
+import { RAID_MODES, isSandboxMode } from './profile.js';
 import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius, SPREAD_CONE_VISION_RATIO } from './visibility.js';
+import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius, SPREAD_CONE_VISION_RATIO, AUTO_FIRE_MIN_ANGLE, AUTO_FIRE_DELAY_MIN, AUTO_FIRE_DELAY_MAX } from './visibility.js';
 import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
@@ -76,6 +76,8 @@ export class Game {
     this._hudCache = '';
     this.settingsOpen = false;
     this.inventoryUi = new RaidInventoryUI(this);
+    this.autoFireTrack = { target: null, since: 0, delay: 0.3, aimAngle: 0 };
+    this.sandboxRaid = false;
   }
 
   async startRaid(mode = 'standard', loadout = {}, mapId = 'factory', mpOptions = null) {
@@ -83,6 +85,7 @@ export class Game {
     this.audio?.startMusic('raid');
     this.fx.clear();
     this.raidMode = mode;
+    this.sandboxRaid = isSandboxMode(mode);
     this.partyType = mpOptions?.partyType || 'solo';
     this.mpDisplayName = mpOptions?.displayName || 'Оператор';
     if (this.multiplayer) {
@@ -118,6 +121,7 @@ export class Game {
     this.groundItems = [];
     this.playerCorpse = null;
     this.pmcCorpses = [];
+    this.autoFireTrack = { target: null, since: 0, delay: 0.3, aimAngle: 0 };
     this.noiseEvents = [];
     this.scavAlerted = new Set();
     this.wasInExtract = false;
@@ -300,9 +304,13 @@ export class Game {
       const mapTheme = getMapTheme(this.activeMap?.theme);
       const pVisionR = playerVisionRadius(viewW, viewH, p.hp / p.maxHp, mapTheme);
       p.coneRange = pVisionR * SPREAD_CONE_VISION_RATIO;
-      const autoFire = !p.isMoving && !!this.findAutoFireTarget(p, pVisionR);
+      const autoFireState = this.evaluateAutoFire(p, pVisionR);
 
-      const shot = p.update(this.input, dt, combat, { autoFire, autoReload: true });
+      const shot = p.update(this.input, dt, combat, {
+        autoFire: autoFireState.active,
+        autoAimAngle: autoFireState.aimAngle,
+        autoReload: true,
+      });
       if (!reloadingBefore && p.reloadTime > 0 && !this.input.tapped('KeyR')) {
         this.audio?.play('reload');
         this.fx.floatText(p.x, p.y - 24, 'Перезарядка…', '#f5e6a8');
@@ -455,12 +463,49 @@ export class Game {
       && !isBlockedBySmoke(p.x, p.y, wx, wy, this.smokeZones);
   }
 
+  isPlayerMovingInput() {
+    return (
+      this.input.pressed('KeyW') ||
+      this.input.pressed('KeyS') ||
+      this.input.pressed('KeyA') ||
+      this.input.pressed('KeyD') ||
+      this.input.pressed('ArrowUp') ||
+      this.input.pressed('ArrowDown') ||
+      this.input.pressed('ArrowLeft') ||
+      this.input.pressed('ArrowRight')
+    );
+  }
+
+  evaluateAutoFire(p, visionRadius) {
+    if (this.isPlayerMovingInput() || p.reloadTime > 0) {
+      this.autoFireTrack.target = null;
+      return { active: false, aimAngle: null };
+    }
+
+    const target = this.findAutoFireTarget(p, visionRadius);
+    if (!target) {
+      this.autoFireTrack.target = null;
+      return { active: false, aimAngle: null };
+    }
+
+    const aimAngle = Math.atan2(target.y - p.y, target.x - p.x);
+    if (this.autoFireTrack.target !== target.ref) {
+      this.autoFireTrack.target = target.ref;
+      this.autoFireTrack.since = this.animTime;
+      this.autoFireTrack.delay =
+        AUTO_FIRE_DELAY_MIN + Math.random() * (AUTO_FIRE_DELAY_MAX - AUTO_FIRE_DELAY_MIN);
+    }
+
+    const ready = this.animTime - this.autoFireTrack.since >= this.autoFireTrack.delay;
+    return { active: ready, aimAngle };
+  }
+
   /** Цель в конусе разброса: видимость, LOS, дистанция ≤ 90% радиуса обзора */
   findAutoFireTarget(p, visionRadius) {
     if (!p.canShoot() || p.dead || !this.activeMap) return null;
 
     const coneRange = visionRadius * SPREAD_CONE_VISION_RATIO;
-    const spread = p.getSpreadAngle();
+    const spread = Math.max(p.getSpreadAngle(), AUTO_FIRE_MIN_ANGLE);
     const walls = this.activeMap.walls;
     const viewW = this.canvas.width / this.scale;
     const viewH = this.canvas.height / this.scale;
@@ -473,11 +518,11 @@ export class Game {
 
     const targets = [];
     for (const scav of this.scavs) {
-      if (!scav.dead) targets.push({ x: scav.x, y: scav.y });
+      if (!scav.dead) targets.push({ x: scav.x, y: scav.y, ref: scav });
     }
     if (this.multiplayer) {
       for (const rp of this.multiplayer.values()) {
-        if (!rp.dead) targets.push({ x: rp.x, y: rp.y });
+        if (!rp.dead) targets.push({ x: rp.x, y: rp.y, ref: rp });
       }
     }
 
@@ -794,6 +839,7 @@ export class Game {
     const loot = survived ? p.getCarriedLoot() : [];
     const lootValue = lootTotalValue(loot);
     const lootCount = loot.length;
+    const sandboxHint = 'Бета-тест: лут не сохранён · инвентарь как до рейда';
     const mpHint =
       this.partyType === 'multi' && type === 'dead'
         ? 'В мультиплеере лут остаётся на теле для других игроков'
@@ -804,14 +850,16 @@ export class Game {
       type,
       title,
       desc,
-      loot,
-      lootValue,
+      loot: this.sandboxRaid ? [] : loot,
+      lootValue: this.sandboxRaid ? 0 : lootValue,
       kills: p.kills,
       mode: this.raidMode,
       mapId: this.activeMap?.id,
       partyType: this.partyType,
-      saveHint:
-        type === 'extracted'
+      sandbox: this.sandboxRaid,
+      saveHint: this.sandboxRaid
+        ? sandboxHint
+        : type === 'extracted'
           ? `После «В лобби» ${lootCount} стак. в схрон · продай в схроне за ${lootValue}₽`
           : mpHint,
     };
