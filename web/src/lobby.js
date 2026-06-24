@@ -8,6 +8,7 @@ import {
   SHOP_ITEMS,
   buyShopItem,
   sellStashItem,
+  getStashSellValue,
   applyRaidResult,
   getSurvivalRate,
   ensureMigratedProfile,
@@ -619,7 +620,7 @@ export class Lobby {
       <div class="stash-cell inv-slot filled" draggable="true" data-stash-idx="${i}" data-drop-zone="stash" title="Перетащи в рюкзак оператора">
         <span class="slot-ico">${itemIcon(item)}</span>
         <span class="stash-cell-name">${item.name}${item.count > 1 ? ' ×' + item.count : ''}</span>
-        <span class="stash-cell-value">${(item.value || 0) * (item.count || 1)} ₽</span>
+        <span class="stash-cell-value">${getStashSellValue(item)} ₽</span>
         <button type="button" class="sell-btn" data-idx="${i}">Продать</button>
       </div>`
         )
@@ -643,7 +644,7 @@ export class Lobby {
 
   getStashInfo() {
     const items = this.profile?.stash?.items || [];
-    const totalValue = items.reduce((s, i) => s + (i.value || 0) * (i.count || 1), 0);
+    const totalValue = items.reduce((s, i) => s + getStashSellValue(i), 0);
     return { count: items.length, totalValue };
   }
 

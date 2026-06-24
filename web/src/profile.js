@@ -10,6 +10,7 @@ import {
   ensureMigratedProfile,
   normalizeLoadout,
 } from './inventory-core.js';
+import { WEAPONS, getWeapon } from './weapons.js';
 
 export const RAID_MODES = {
   standard: { id: 'standard', name: 'Стандарт', duration: 5 * 60, desc: '5 минут, полный лут' },
@@ -40,6 +41,20 @@ export function isSandboxMode(mode) {
 
 /** Фиксированный набор для режима бета-тест */
 export function createBetaTestLoadout() {
+  const shopWeaponValue = (weaponId) =>
+    SHOP_ITEMS.find((s) => s.item?.weapon === weaponId)?.item?.value ?? 10;
+
+  const backpackWeapons = Object.keys(WEAPONS).map((weaponId) => {
+    const w = getWeapon(weaponId);
+    return {
+      id: `beta_${weaponId}`,
+      name: w.name,
+      weapon: weaponId,
+      value: shopWeaponValue(weaponId),
+      count: 1,
+    };
+  });
+
   return normalizeLoadout({
     equipped: {
       weapon: { id: 'beta_ak', name: 'АК-74', weapon: 'ak', value: 20 },
@@ -50,7 +65,10 @@ export function createBetaTestLoadout() {
       { id: 'beta_med2', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 },
       { id: 'beta_med3', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 },
     ],
-    backpack: [{ id: 'beta_ammo', name: 'Патроны', ammo: 36, value: 0, count: 1 }],
+    backpack: [
+      ...backpackWeapons,
+      { id: 'beta_ammo', name: 'Патроны', ammo: 36, value: 30, count: 1 },
+    ],
   });
 }
 
@@ -69,7 +87,7 @@ export const SHOP_ITEMS = [
   { id: 'shotgun', name: 'Дробовик', cost: 180, item: { id: 'shotgun', name: 'Дробовик', weapon: 'shotgun', value: 12 } },
   { id: 'ak', name: 'АК-74', cost: 350, item: { id: 'ak', name: 'АК-74', weapon: 'ak', value: 20 } },
   { id: 'sniper', name: 'СВД', cost: 500, item: { id: 'sniper', name: 'СВД', weapon: 'sniper', value: 50 } },
-  { id: 'ammo', name: 'Патроны +36', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 36, value: 0 } },
+  { id: 'ammo', name: 'Патроны +36', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 36, value: 30 } },
   { id: 'bandage', name: 'Бинт', cost: 20, item: { id: 'bandage', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 } },
   { id: 'medkit', name: 'Аптечка', cost: 75, item: { id: 'medkit', name: 'Аптечка', heal: 75, healDuration: 3, consumable: true, value: 0 } },
   { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 50, value: 8 } },
@@ -162,6 +180,15 @@ export function buyShopItem(profile, shopId) {
   return { ok: true, profile: p, msg: `${shop.name} → схрон` };
 }
 
+/** Цена продажи предмета из схрона (₽) */
+export function getStashSellValue(item) {
+  if (!item) return 0;
+  const count = item.count || 1;
+  if ((item.value || 0) > 0) return item.value * count;
+  if (item.ammo) return Math.round(item.ammo * (15 / 18)) * count;
+  return 0;
+}
+
 export function sellStashItem(profile, index) {
   const p = ensureMigratedProfile({
     ...profile,
@@ -169,11 +196,11 @@ export function sellStashItem(profile, index) {
   });
   const item = p.stash.items[index];
   if (!item) return { ok: false, msg: 'Нет предмета' };
-  const value = (item.value || 0) * (item.count || 1);
+  const value = getStashSellValue(item);
   if (value <= 0) return { ok: false, msg: 'Нечего продавать', profile: p };
   p.rubles += value;
   p.stash.items.splice(index, 1);
-  return { ok: true, profile: p, msg: `Продано: ${item.name}${item.count > 1 ? ` ×${item.count}` : ''}` };
+  return { ok: true, profile: p, msg: `Продано: ${item.name}${item.count > 1 ? ` ×${item.count}` : ''} · +${value}₽` };
 }
 
 export { ensureMigratedProfile, lootTotalValue, stackItems, emptyLoadout, emptyBackpack, emptyHotbar };

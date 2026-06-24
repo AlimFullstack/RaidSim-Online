@@ -44,7 +44,7 @@ export const LOOT_TABLE = {
   normal: [
     { id: 'empty', name: 'Пусто', weight: 2, value: 0 },
     { id: 'coin', name: 'Монета', weight: 3, value: 1 },
-    { id: 'ammo', name: 'Патроны', weight: 7, value: 0, ammo: 18 },
+    { id: 'ammo', name: 'Патроны', weight: 7, value: 15, ammo: 18 },
     { id: 'bandage', name: 'Бинт', weight: 2, value: 0, heal: 20, healDuration: 1, consumable: true },
     { id: 'food', name: 'Еда', weight: 2, value: 1 },
     { id: 'bolt', name: 'Болт', weight: 2, value: 2 },
@@ -53,7 +53,7 @@ export const LOOT_TABLE = {
     { id: 'smoke', name: 'Дымовая', weight: 1, value: 6, consumable: true, smoke: true },
   ],
   valuable: [
-    { id: 'ammo2', name: 'Патроны x2', weight: 5, value: 0, ammo: 36 },
+    { id: 'ammo2', name: 'Патроны x2', weight: 5, value: 30, ammo: 36 },
     { id: 'medkit', name: 'Аптечка', weight: 3, value: 0, heal: 75, healDuration: 3, consumable: true },
     { id: 'armor', name: 'Бронежилет', weight: 2, value: 8, armor: 50 },
     { id: 'shotgun', name: 'Дробовик', weight: 2, value: 12, weapon: 'shotgun' },

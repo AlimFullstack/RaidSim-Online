@@ -8,7 +8,6 @@ export const WALKING_STAND_SPREAD_MULT = 3;
 export const PLAYER_SPREAD_REDUCTION = 0.1;
 const STANDING_FIRE_RATE_MULT = 1 / 1.05;
 
-export const PLAYER_AMMO_MULT = 2;
 export const PLAYER_FIRE_RATE_MULT = 0.5;
 export const PLAYER_BULLET_SPEED_MULT = 2;
 export const RAID_LOOT_VALUE_MULT = 5;
@@ -105,7 +104,7 @@ export const WEAPONS = {
     id: 'sniper',
     name: 'СВД',
     magSize: 1,
-    damage: 121,
+    damage: 140,
     fireRate: 1.1,
     spread: 0.042,
     moveSpread: WALK_SPREAD,

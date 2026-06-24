@@ -23,7 +23,7 @@ describe('player heal and loot', () => {
     expect(p.activeHeal).toBeNull();
   });
 
-  it('addLoot multiplies value by 5 and ammo by 2', () => {
+  it('addLoot multiplies value by 5, ammo unchanged', () => {
     const p = new Player(100, 100, []);
     const coin = p.addLoot({ id: 'coin', name: 'Монета', value: 1, uid: 'c1' });
     expect(coin.ok).toBe(true);
@@ -33,7 +33,7 @@ describe('player heal and loot', () => {
     const ammo = p.addLoot({ id: 'ammo', name: 'Патроны', ammo: 18, uid: 'a1' });
     expect(ammo.ok).toBe(true);
     const ammoItem = [...p.hotbar, ...p.backpack].find((i) => i?.ammo);
-    expect(ammoItem?.ammo).toBe(36);
+    expect(ammoItem?.ammo).toBe(18);
   });
 
   it('shop has bandage 20 and medkit 75', () => {

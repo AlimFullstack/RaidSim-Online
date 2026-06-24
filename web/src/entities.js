@@ -18,7 +18,6 @@ import {
   calcSniperSpread,
   getFireRate,
   getMuzzleOffset,
-  PLAYER_AMMO_MULT,
   PLAYER_FIRE_RATE_MULT,
   PLAYER_BULLET_SPEED_MULT,
   RAID_LOOT_VALUE_MULT,
@@ -353,7 +352,7 @@ export class Player extends Entity {
   constructor(x, y, walls = []) {
     super(x, y, 16, walls);
     this.clearWeaponState();
-    this.reserve = 36 * PLAYER_AMMO_MULT;
+    this.reserve = 36;
     this.fireCooldown = 0;
     this.reloadTime = 0;
     this.reloadDuration = 0;
@@ -718,8 +717,8 @@ export class Player extends Entity {
     const w = getWeapon(id);
     this.weaponId = w.id;
     this.weaponName = w.name;
-    this.magSize = w.magSize * PLAYER_AMMO_MULT;
-    this.ammo = w.magSize * PLAYER_AMMO_MULT;
+    this.magSize = w.magSize;
+    this.ammo = w.magSize;
     this.weaponDamage = w.damage;
     this.fireRate = w.fireRate;
     this.spread = w.spread;
@@ -906,7 +905,6 @@ export class Player extends Entity {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
     const enriched = { ...item };
     if (enriched.value > 0) enriched.value *= RAID_LOOT_VALUE_MULT;
-    if (enriched.ammo) enriched.ammo *= PLAYER_AMMO_MULT;
     const r = addToLoadout(
       { hotbar: this.hotbar, backpack: this.backpack, equipped: this.equipped },
       enriched,
