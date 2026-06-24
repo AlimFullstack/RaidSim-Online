@@ -9,8 +9,7 @@ import {
   orderBy,
   limit,
 } from 'firebase/firestore';
-import { RemotePlayer } from './entities.js';
-import { PlayerCorpse } from './entities.js';
+import { RemotePlayer, PlayerCorpse } from './entities.js';
 import { stackItems } from './inventory-core.js';
 
 const SYNC_INTERVAL = 0.1;
@@ -35,6 +34,9 @@ export class RaidMultiplayer {
     this.lastHitAt = 0;
     this.walls = [];
     this.playersMeta = [];
+    this.publishing = false;
+    this.hitsUseOrderBy = true;
+    this.hitsSubscribed = false;
   }
 
   async start(players, walls) {
@@ -50,8 +52,10 @@ export class RaidMultiplayer {
     const playersCol = collection(this.db, 'matches', this.matchId, 'players');
     this.unsubs.push(
       onSnapshot(playersCol, (snap) => {
+        const seen = new Set();
         for (const d of snap.docs) {
           if (d.id === this.myUid) continue;
+          seen.add(d.id);
           const data = d.data();
           let rp = this.remotePlayers.get(d.id);
           if (!rp) {
@@ -61,24 +65,13 @@ export class RaidMultiplayer {
           rp.applyState(data);
           this.syncRemoteCorpse(d.id, rp, data);
         }
+        for (const uid of [...this.remotePlayers.keys()]) {
+          if (!seen.has(uid)) this.remotePlayers.delete(uid);
+        }
       })
     );
 
-    const hitsCol = collection(this.db, 'matches', this.matchId, 'hits');
-    const hitsQ = query(hitsCol, orderBy('at', 'desc'), limit(40));
-    this.unsubs.push(
-      onSnapshot(hitsQ, (snap) => {
-        for (const d of snap.docs) {
-          const hit = d.data();
-          if (hit.targetUid !== this.myUid) continue;
-          const key = d.id;
-          if (this.processedHits.has(key)) continue;
-          this.processedHits.set(key, Date.now());
-          this.applyIncomingHit(hit);
-        }
-        this.pruneHits();
-      })
-    );
+    this.subscribeHits();
 
     const corpsesCol = collection(this.db, 'matches', this.matchId, 'corpses');
     this.unsubs.push(
@@ -92,6 +85,40 @@ export class RaidMultiplayer {
     );
 
     await this.publishState(true);
+  }
+
+  subscribeHits() {
+    if (this.hitsSubscribed) return;
+    this.hitsSubscribed = true;
+    const hitsCol = collection(this.db, 'matches', this.matchId, 'hits');
+    const hitsQ = this.hitsUseOrderBy
+      ? query(hitsCol, orderBy('at', 'desc'), limit(40))
+      : query(hitsCol, limit(40));
+
+    this.unsubs.push(
+      onSnapshot(
+        hitsQ,
+        (snap) => {
+          for (const d of snap.docs) {
+            const hit = d.data();
+            if (hit.targetUid !== this.myUid) continue;
+            const key = d.id;
+            if (this.processedHits.has(key)) continue;
+            this.processedHits.set(key, Date.now());
+            this.applyIncomingHit(hit);
+          }
+          this.pruneHits();
+        },
+        (err) => {
+          if (this.hitsUseOrderBy) {
+            console.warn('Hits index missing, falling back', err);
+            this.hitsUseOrderBy = false;
+            this.hitsSubscribed = false;
+            this.subscribeHits();
+          }
+        }
+      )
+    );
   }
 
   pruneHits() {
@@ -116,13 +143,6 @@ export class RaidMultiplayer {
 
   syncRemoteCorpse(uid, rp, data) {
     if (!data.dead) return;
-    if (this.game.pmcCorpses.some((c) => c.ownerUid === uid)) return;
-    const loot = data.loot || [];
-    const corpse = new PlayerCorpse(data.x ?? rp.x, data.y ?? rp.y, loot, {
-      ownerUid: uid,
-      label: rp.name,
-    });
-    this.game.pmcCorpses.push(corpse);
     rp.dead = true;
   }
 
@@ -130,7 +150,11 @@ export class RaidMultiplayer {
     let corpse = this.game.pmcCorpses.find((c) => c.ownerUid === uid);
     if (!corpse) {
       const meta = this.playersMeta.find((p) => p.uid === uid);
-      corpse = new PlayerCorpse(x, y, loot, { ownerUid: uid, label: meta?.displayName || 'PMC' });
+      const rp = this.remotePlayers.get(uid);
+      corpse = new PlayerCorpse(x, y, loot, {
+        ownerUid: uid,
+        label: rp?.name || meta?.displayName || 'PMC',
+      });
       this.game.pmcCorpses.push(corpse);
     } else {
       corpse.x = x;
@@ -149,9 +173,9 @@ export class RaidMultiplayer {
     }
   }
 
-  async publishState(force = false) {
+  publishState(force = false) {
     const p = this.game.player;
-    if (!p) return;
+    if (!p || this.publishing) return;
     const payload = {
       x: Math.round(p.x),
       y: Math.round(p.y),
@@ -160,16 +184,20 @@ export class RaidMultiplayer {
       maxHp: p.maxHp,
       dead: p.dead,
       name: this.game.mpDisplayName || 'Оператор',
+      weaponId: p.weaponId || null,
       at: Date.now(),
     };
     if (p.dead) {
       payload.loot = stackItems(p.getCarriedLoot());
     }
-    try {
-      await setDoc(doc(this.db, 'matches', this.matchId, 'players', this.myUid), payload, { merge: true });
-    } catch (e) {
-      if (force) console.warn('MP sync failed', e);
-    }
+    this.publishing = true;
+    return setDoc(doc(this.db, 'matches', this.matchId, 'players', this.myUid), payload, { merge: true })
+      .catch((e) => {
+        if (force) console.warn('MP sync failed', e);
+      })
+      .finally(() => {
+        this.publishing = false;
+      });
   }
 
   async reportHit(targetUid, damage) {
@@ -196,7 +224,7 @@ export class RaidMultiplayer {
         { x, y, loot: stacked, looted: false, at: Date.now() },
         { merge: true }
       );
-      await this.publishState(true);
+      this.publishState(true);
     } catch (e) {
       console.warn('Death sync failed', e);
     }

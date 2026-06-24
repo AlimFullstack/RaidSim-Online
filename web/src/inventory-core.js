@@ -14,6 +14,7 @@ export function itemsMatch(a, b) {
   if (a.id !== b.id) return false;
   if (!isStackable(a) || !isStackable(b)) return false;
   return (a.heal || 0) === (b.heal || 0)
+    && (a.healDuration || 0) === (b.healDuration || 0)
     && (a.ammo || 0) === (b.ammo || 0)
     && (a.value || 0) === (b.value || 0)
     && !!a.grenade === !!b.grenade
@@ -65,6 +66,14 @@ function padSlots(slots, size) {
 }
 
 /** @param {object} loadout */
+function stripLegacyLoadoutKeys(loadout) {
+  delete loadout.weapon;
+  delete loadout.extraMedkits;
+  delete loadout.extraAmmo;
+  delete loadout.startArmor;
+}
+
+/** @param {object} loadout */
 export function normalizeLoadout(loadout = {}) {
   const target = loadout && typeof loadout === 'object' ? loadout : {};
   const oldBp = target.backpack;
@@ -82,8 +91,19 @@ export function normalizeLoadout(loadout = {}) {
   }
 
   if (!target.equipped) target.equipped = emptyEquipped();
+  stripLegacyLoadoutKeys(target);
 
   return target;
+}
+
+/** Clean loadout snapshot for cloud save — no legacy fields, deep-cloned slots */
+export function loadoutForSave(loadout) {
+  const ld = normalizeLoadout(loadout || {});
+  return {
+    hotbar: ld.hotbar.map((s) => (s ? cloneItem(s) : null)),
+    backpack: ld.backpack.map((s) => (s ? cloneItem(s) : null)),
+    equipped: cloneEquipped(ld.equipped),
+  };
 }
 
 /** @param {'hotbar'|'backpack'} zone @param {object} loadout */
@@ -406,7 +426,7 @@ export function migrateProfile(profile) {
   };
 
   if (old.weapon && old.weapon !== 'pm') {
-    const names = { shotgun: 'Дробовик', ak: 'АК-74', pp: 'ПП-91', pm: 'ПМ' };
+    const names = { shotgun: 'Дробовик', ak: 'АК-74', pp: 'ПП-91', sniper: 'СВД', pm: 'ПМ' };
     tryAdd({
       id: old.weapon,
       name: names[old.weapon] || old.weapon,
@@ -417,13 +437,13 @@ export function migrateProfile(profile) {
   }
 
   for (let i = 0; i < (old.extraMedkits || 0); i++) {
-    tryAdd({ id: 'medkit', name: 'Аптечка', heal: 50, consumable: true, count: 1 });
+    tryAdd({ id: 'medkit', name: 'Аптечка', heal: 75, healDuration: 3, consumable: true, count: 1 });
   }
 
   if (old.extraAmmo) {
-    tryAdd({ id: 'ammo', name: 'Патроны', ammo: 18, value: 0, count: 1 });
+    tryAdd({ id: 'ammo', name: 'Патроны', ammo: 36, value: 0, count: 1 });
     if (old.extraAmmo > 18) {
-      tryAdd({ id: 'ammo', name: 'Патроны', ammo: old.extraAmmo - 18, value: 0, count: 1 });
+      tryAdd({ id: 'ammo', name: 'Патроны', ammo: (old.extraAmmo - 18) * 2, value: 0, count: 1 });
     }
   }
 
@@ -443,18 +463,17 @@ export function migrateProfile(profile) {
 /** @param {object} profile */
 export function ensureMigratedProfile(profile) {
   const ld = profile.loadout || {};
+  const hasNewFormat = Array.isArray(ld.hotbar) || (ld.equipped && typeof ld.equipped === 'object');
   const hasOldFormat =
-    'extraMedkits' in ld ||
-    'extraAmmo' in ld ||
-    'startArmor' in ld ||
-    'weapon' in ld;
+    !hasNewFormat &&
+    ('extraMedkits' in ld || 'extraAmmo' in ld || 'startArmor' in ld || 'weapon' in ld);
 
   if (hasOldFormat) return migrateProfile(profile);
 
   return {
     ...profile,
     stash: { items: stackItems(profile.stash?.items || []) },
-    loadout: normalizeLoadout(ld),
+    loadout: normalizeLoadout({ ...ld }),
   };
 }
 

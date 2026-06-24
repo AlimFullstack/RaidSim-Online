@@ -276,6 +276,10 @@ body {
   border-radius: 2px;
 }
 
+#game.raid-combat {
+  cursor: none;
+}
+
 .hidden {
   display: none !important;
 }
@@ -654,6 +658,11 @@ body {
 
 .fill.armor {
   background: linear-gradient(90deg, #1a2830, #4a6a7a, #5a7a8a);
+  box-shadow: none;
+}
+
+.fill.stamina {
+  background: linear-gradient(90deg, #3a3018, #8a7a30, #a09040);
   box-shadow: none;
 }
 

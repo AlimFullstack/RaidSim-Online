@@ -12,7 +12,18 @@ import {
   generateScavLoot,
   getMapBounds,
 } from './map-core.js';
-import { getWeapon, calcSpread, getFireRate, getMuzzleOffset } from './weapons.js';
+import {
+  getWeapon,
+  calcSpread,
+  calcSniperSpread,
+  getFireRate,
+  getMuzzleOffset,
+  PLAYER_AMMO_MULT,
+  PLAYER_FIRE_RATE_MULT,
+  PLAYER_BULLET_SPEED_MULT,
+  RAID_LOOT_VALUE_MULT,
+  BULLET_SIZE_MULT,
+} from './weapons.js';
 import {
   emptyBackpack,
   emptyHotbar,
@@ -115,7 +126,7 @@ export class Bullet {
     this.damage = damage;
     this.dead = false;
     this.life = 1.4;
-    this.r = opts.size || 3;
+    this.r = (opts.size || 2) * BULLET_SIZE_MULT;
     this.walls = walls;
     this.maxRange = maxRange;
     this.tracerColor = opts.tracerColor || COLORS.bullet;
@@ -142,12 +153,12 @@ export class Bullet {
   }
 
   draw(ctx) {
-    const tail = 10 + this.r * 2;
+    const tail = 9 + this.r * 1.8;
     const tx = this.x - Math.cos(this.angle) * tail;
     const ty = this.y - Math.sin(this.angle) * tail;
 
     ctx.strokeStyle = this.tracerColor;
-    ctx.lineWidth = this.isPellet ? 1.5 : 2.5;
+    ctx.lineWidth = (this.isPellet ? 0.65 : 0.9) * BULLET_SIZE_MULT;
     ctx.globalAlpha = 0.85;
     ctx.beginPath();
     ctx.moveTo(tx, ty);
@@ -283,11 +294,66 @@ export class Entity {
   }
 }
 
+const WALK_SPEED = 63;
+const SPRINT_SPEED = 180;
+const STAMINA_DRAIN_RATE = 1 / 5;
+const STAMINA_REGEN_DELAY = 2;
+const STAMINA_REGEN_RATE = 1 / 4;
+
+export function drawHeldWeapon(ctx, weaponId) {
+  const id = weaponId;
+  if (id === 'pm') {
+    ctx.fillStyle = '#1a1510';
+    ctx.fillRect(6, -3, 14, 6);
+    ctx.fillStyle = '#3d3428';
+    ctx.fillRect(18, -2, 8, 4);
+    ctx.fillStyle = '#5a4a38';
+    ctx.fillRect(4, -1, 6, 2);
+  } else if (id === 'ak') {
+    ctx.fillStyle = '#2a2418';
+    ctx.fillRect(4, -4, 22, 8);
+    ctx.fillStyle = '#4a4030';
+    ctx.fillRect(22, -2, 14, 4);
+    ctx.fillStyle = '#6b5a40';
+    ctx.fillRect(8, -6, 8, 3);
+    ctx.fillStyle = '#8b7355';
+    ctx.fillRect(-2, -2, 8, 4);
+  } else if (id === 'pp') {
+    ctx.fillStyle = '#2a2820';
+    ctx.fillRect(6, -3, 16, 6);
+    ctx.fillStyle = '#4a4438';
+    ctx.fillRect(20, -2, 10, 4);
+    ctx.fillStyle = '#6a6050';
+    ctx.fillRect(2, -2, 8, 4);
+  } else if (id === 'shotgun') {
+    ctx.fillStyle = '#2c2418';
+    ctx.fillRect(2, -5, 20, 10);
+    ctx.fillStyle = '#4a4035';
+    ctx.fillRect(20, -3, 12, 6);
+    ctx.fillStyle = '#6b5d4d';
+    ctx.fillRect(0, -3, 8, 6);
+  } else if (id === 'sniper') {
+    ctx.fillStyle = '#1e1a14';
+    ctx.fillRect(0, -3, 34, 6);
+    ctx.fillStyle = '#3a3228';
+    ctx.fillRect(32, -2, 10, 4);
+    ctx.fillStyle = '#5a5040';
+    ctx.fillRect(-4, -2, 10, 4);
+    ctx.fillStyle = '#2a2820';
+    ctx.fillRect(10, -7, 6, 4);
+    ctx.fillStyle = '#4a4438';
+    ctx.fillRect(12, -9, 2, 6);
+  } else if (id) {
+    ctx.fillStyle = '#2c2418';
+    ctx.fillRect(8, -4, 18, 8);
+  }
+}
+
 export class Player extends Entity {
   constructor(x, y, walls = []) {
     super(x, y, 16, walls);
     this.clearWeaponState();
-    this.reserve = 36;
+    this.reserve = 36 * PLAYER_AMMO_MULT;
     this.fireCooldown = 0;
     this.reloadTime = 0;
     this.reloadDuration = 0;
@@ -308,6 +374,10 @@ export class Player extends Entity {
     this.currentSpread = 0;
     this.fireBlockedReason = '';
     this.coneRange = 0;
+    this.stoppedTime = 0;
+    this.activeHeal = null;
+    this.stamina = 1;
+    this.staminaRegenDelay = 0;
   }
 
   initRaidInventory(loadout = {}) {
@@ -556,10 +626,39 @@ export class Player extends Entity {
     const item = this.getSelectedItem();
     if (!item?.heal) return { ok: false, msg: 'Выбери слот с аптечкой или бинтом' };
     if (this.hp >= this.maxHp) return { ok: false, msg: 'HP полное' };
+    if (this.activeHeal) return { ok: false, msg: 'Уже лечишься' };
     const amount = item.heal;
-    this.hp = Math.min(this.maxHp, this.hp + amount);
+    const duration = item.healDuration || 1;
     removeFromBackpack(this.hotbar, this.selectedSlot, 1);
-    return { ok: true, msg: `+${amount} HP`, amount };
+    this.activeHeal = { total: amount, duration, elapsed: 0, baseHp: this.hp };
+    const secLabel = duration === 1 ? '1 сек' : `${duration} сек`;
+    return { ok: true, msg: `+${amount} HP (${secLabel})`, amount, duration };
+  }
+
+  tickHeal(dt) {
+    if (!this.activeHeal) return;
+    const h = this.activeHeal;
+    h.elapsed += dt;
+    const t = Math.min(1, h.elapsed / h.duration);
+    this.hp = Math.min(this.maxHp, h.baseHp + h.total * t);
+    if (t >= 1) this.activeHeal = null;
+  }
+
+  tickStamina(dt, wantSprint) {
+    const canSprint = wantSprint && this.stamina > 0.001;
+    if (canSprint) {
+      this.stamina = Math.max(0, this.stamina - dt * STAMINA_DRAIN_RATE);
+      this.staminaRegenDelay = STAMINA_REGEN_DELAY;
+      this.isSprinting = true;
+    } else {
+      if (this.isSprinting) this.staminaRegenDelay = STAMINA_REGEN_DELAY;
+      this.isSprinting = false;
+      if (this.staminaRegenDelay > 0) {
+        this.staminaRegenDelay = Math.max(0, this.staminaRegenDelay - dt);
+      } else if (this.stamina < 1) {
+        this.stamina = Math.min(1, this.stamina + dt * STAMINA_REGEN_RATE);
+      }
+    }
   }
 
   useSelectedArmor() {
@@ -619,8 +718,8 @@ export class Player extends Entity {
     const w = getWeapon(id);
     this.weaponId = w.id;
     this.weaponName = w.name;
-    this.magSize = w.magSize;
-    this.ammo = w.magSize;
+    this.magSize = w.magSize * PLAYER_AMMO_MULT;
+    this.ammo = w.magSize * PLAYER_AMMO_MULT;
     this.weaponDamage = w.damage;
     this.fireRate = w.fireRate;
     this.spread = w.spread;
@@ -636,12 +735,22 @@ export class Player extends Entity {
   getEffectiveFireRate() {
     const w = this.weaponDef || getWeapon(this.weaponId);
     if (!w) return 0;
-    return getFireRate(w, { moving: this.isMoving, sprinting: this.isSprinting && this.isMoving });
+    return getFireRate(w, { moving: this.isMoving, sprinting: this.isSprinting && this.isMoving })
+      * PLAYER_FIRE_RATE_MULT;
   }
 
   getSpreadAngle() {
     if (!this.canShoot()) return 0;
-    return calcSpread(this.weaponDef || getWeapon(this.weaponId), {
+    const w = this.weaponDef || getWeapon(this.weaponId);
+    if (w.sniper) {
+      return calcSniperSpread(w, {
+        moving: this.isMoving,
+        sprinting: this.isSprinting && this.isMoving,
+        stoppedTime: this.stoppedTime,
+        recoilHeat: this.recoilHeat,
+      });
+    }
+    return calcSpread(w, {
       moving: this.isMoving,
       sprinting: this.isSprinting && this.isMoving,
       recoilHeat: this.recoilHeat,
@@ -655,7 +764,7 @@ export class Player extends Entity {
 
   /** @returns {Bullet[]|null} */
   update(input, dt, combat = true, opts = {}) {
-    const { autoFire = false, autoReload = false, autoAimAngle = null } = opts;
+    const { autoReload = false } = opts;
     if (this.dead) return null;
 
     let dx = 0;
@@ -666,11 +775,18 @@ export class Player extends Entity {
     if (input.pressed('KeyD') || input.pressed('ArrowRight')) dx += 1;
 
     this.isMoving = !!(dx || dy);
-    this.isSprinting = (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving;
+    if (this.isMoving) {
+      this.stoppedTime = 0;
+    } else {
+      this.stoppedTime += dt;
+    }
+    const wantSprint =
+      (input.pressed('ShiftLeft') || input.pressed('ShiftRight')) && this.isMoving && this.reloadTime <= 0;
+    this.tickStamina(dt, wantSprint);
     this.isFiring =
-      combat && this.canShoot() && (input.mouse.down || autoFire) && this.ammo > 0 && this.reloadTime <= 0;
+      combat && this.canShoot() && input.mouse.down && this.ammo > 0 && this.reloadTime <= 0;
 
-    const baseSpeed = this.isSprinting ? 180 : 126;
+    const baseSpeed = this.isSprinting ? SPRINT_SPEED : WALK_SPEED;
     const shootSlow = this.isFiring || this.fireCooldown > this.getEffectiveFireRate() * 0.4;
     const reloading = this.reloadTime > 0;
     this.speed = reloading ? baseSpeed * 0.35 : shootSlow ? baseSpeed * 0.5 : baseSpeed;
@@ -679,10 +795,10 @@ export class Player extends Entity {
     this.noiseLevel = this.isSprinting ? 1 : 0;
 
     this.recoilHeat = Math.max(0, this.recoilHeat - dt * (this.semiAuto ? 2.4 : 1.6));
+    this.tickHeal(dt);
     this.currentSpread = this.getSpreadAngle();
 
     this.angle = Math.atan2(input.mouse.worldY - this.y, input.mouse.worldX - this.x);
-    if (autoFire && autoAimAngle != null) this.angle = autoAimAngle;
 
     for (let i = 0; i < this.maxInv; i++) {
       if (input.tapped(`Digit${i + 1}`)) this.selectSlot(i);
@@ -732,10 +848,11 @@ export class Player extends Entity {
     }
 
     const w = this.weaponDef || getWeapon(this.weaponId);
-    const manualTrigger = w.semiAuto ? input.mouse.justDown : input.mouse.down;
-    const autoTrigger = autoFire && this.ammo > 0;
-    const trigger = w.semiAuto ? manualTrigger || autoTrigger : manualTrigger || autoFire;
+    const trigger = input.mouse.down && !(w.standToFire && this.isMoving);
     this.fireBlockedReason = '';
+    if (w.standToFire && this.isMoving) {
+      this.fireBlockedReason = 'Стоя';
+    }
 
     if (combat && this.canShoot() && trigger && this.fireCooldown <= 0 && this.ammo > 0) {
       this.ammo -= 1;
@@ -749,7 +866,7 @@ export class Player extends Entity {
       const ox = this.x + Math.cos(this.angle) * muzzle.x;
       const oy = this.y + Math.sin(this.angle) * muzzle.x;
       const bulletOpts = {
-        speed: w.bulletSpeed,
+        speed: w.bulletSpeed * PLAYER_BULLET_SPEED_MULT,
         size: w.bulletSize,
         tracerColor: w.tracerColor,
         isPellet: w.pellets > 1,
@@ -764,7 +881,7 @@ export class Player extends Entity {
             'player',
             this.weaponDamage,
             this.walls,
-            this.weaponRange,
+            this.getShotRange(),
             ox,
             oy,
             bulletOpts
@@ -787,21 +904,24 @@ export class Player extends Entity {
 
   addLoot(item) {
     if (item.id === 'empty') return { ok: true, msg: 'Ничего полезного.' };
+    const enriched = { ...item };
+    if (enriched.value > 0) enriched.value *= RAID_LOOT_VALUE_MULT;
+    if (enriched.ammo) enriched.ammo *= PLAYER_AMMO_MULT;
     const r = addToLoadout(
       { hotbar: this.hotbar, backpack: this.backpack, equipped: this.equipped },
-      item,
-      item.count || 1
+      enriched,
+      enriched.count || 1
     );
     if (!r.ok) return { ok: false, msg: 'Рюкзак полон! Выброси (Q) или разверни рюкзак' };
-    const price = item.value ? ` · ${item.value}₽` : '';
+    const price = enriched.value ? ` · ${enriched.value}₽` : '';
     let hint = 'Tab — рюкзак';
-    if (item.weapon || item.armor) hint = 'Tab — надень на персонажа';
-    else if (item.heal) hint = 'F';
-    else if (item.grenade) hint = 'G';
-    else if (item.smoke) hint = 'V';
-    else if (item.ammo) hint = 'R — в запас';
+    if (enriched.weapon || enriched.armor) hint = 'Tab — надень на персонажа';
+    else if (enriched.heal) hint = 'F';
+    else if (enriched.grenade) hint = 'G';
+    else if (enriched.smoke) hint = 'V';
+    else if (enriched.ammo) hint = 'R — в запас';
     const where = r.zone === 'hotbar' ? 'панель' : 'рюкзак';
-    return { ok: true, msg: `В ${where}: ${item.name}${price} (${hint})` };
+    return { ok: true, msg: `В ${where}: ${enriched.name}${price} (${hint})` };
   }
 
   draw(ctx) {
@@ -836,49 +956,19 @@ export class Player extends Entity {
   }
 
   drawWeaponModel(ctx) {
-    const id = this.weaponId;
-    if (id === 'pm') {
-      ctx.fillStyle = '#1a1510';
-      ctx.fillRect(6, -3, 14, 6);
-      ctx.fillStyle = '#3d3428';
-      ctx.fillRect(18, -2, 8, 4);
-      ctx.fillStyle = '#5a4a38';
-      ctx.fillRect(4, -1, 6, 2);
-    } else if (id === 'ak') {
-      ctx.fillStyle = '#2a2418';
-      ctx.fillRect(4, -4, 22, 8);
-      ctx.fillStyle = '#4a4030';
-      ctx.fillRect(22, -2, 14, 4);
-      ctx.fillStyle = '#6b5a40';
-      ctx.fillRect(8, -6, 8, 3);
-      ctx.fillStyle = '#8b7355';
-      ctx.fillRect(-2, -2, 8, 4);
-    } else if (id === 'pp') {
-      ctx.fillStyle = '#2a2820';
-      ctx.fillRect(6, -3, 16, 6);
-      ctx.fillStyle = '#4a4438';
-      ctx.fillRect(20, -2, 10, 4);
-      ctx.fillStyle = '#6a6050';
-      ctx.fillRect(2, -2, 8, 4);
-    } else if (id === 'shotgun') {
-      ctx.fillStyle = '#2c2418';
-      ctx.fillRect(2, -5, 20, 10);
-      ctx.fillStyle = '#4a4035';
-      ctx.fillRect(20, -3, 12, 6);
-      ctx.fillStyle = '#6b5d4d';
-      ctx.fillRect(0, -3, 8, 6);
-    } else {
-      ctx.fillStyle = '#2c2418';
-      ctx.fillRect(8, -4, 18, 8);
-    }
+    drawHeldWeapon(ctx, this.weaponId);
+  }
+
+  getShotRange() {
+    return this.coneRange > 0 ? this.coneRange : 120;
   }
 
   drawSpreadCone(ctx) {
-    if (!this.canShoot() || this.isMoving) return;
+    if (!this.canShoot()) return;
     const spread = this.currentSpread;
     if (spread <= 0) return;
 
-    const range = this.coneRange > 0 ? this.coneRange : 120;
+    const range = this.getShotRange();
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
@@ -922,6 +1012,7 @@ export class Scav extends Entity {
     this.burstSize = this.isBoss ? 0 : 3;
     this.burstPauseDuration = NPC_BURST_PAUSE;
     this.name = this.isBoss ? 'Босс' : 'Scav';
+    this.bodyColor = this.isBoss ? (COLORS.boss || '#8e24aa') : COLORS.scav;
     this.hp = this.isBoss ? 500 : 125;
     this.maxHp = this.hp;
     this.magSize = this.isBoss ? 24 : 12;
@@ -1177,15 +1268,18 @@ export class Scav extends Entity {
 
     if (this.reloadTime > 0 && this.reloadDuration > 0) {
       const prog = 1 - this.reloadTime / this.reloadDuration;
-      ctx.strokeStyle = 'rgba(46, 204, 113, 0.9)';
+      ctx.strokeStyle = this.bodyColor;
+      ctx.globalAlpha = 0.9;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.r + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
       ctx.stroke();
-      ctx.fillStyle = 'rgba(46, 204, 113, 0.95)';
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = this.bodyColor;
       ctx.font = '10px JetBrains Mono';
       ctx.textAlign = 'center';
       ctx.fillText(`↻ ${Math.ceil(prog * 100)}%`, this.x, this.y - this.r - 14);
+      ctx.globalAlpha = 1;
     }
 
     ctx.save();
@@ -1197,7 +1291,7 @@ export class Scav extends Entity {
     ctx.ellipse(0, 5, 13, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = this.isBoss ? COLORS.boss || '#8e24aa' : COLORS.scav;
+    ctx.fillStyle = this.bodyColor;
     ctx.beginPath();
     ctx.arc(0, 0, this.r, 0, Math.PI * 2);
     ctx.fill();
@@ -1303,6 +1397,7 @@ export class RemotePlayer {
     this.dead = false;
     this.r = 16;
     this.walls = walls;
+    this.weaponId = null;
   }
 
   applyState(s) {
@@ -1313,6 +1408,7 @@ export class RemotePlayer {
     if (s.maxHp != null) this.maxHp = s.maxHp;
     if (s.dead) this.dead = true;
     if (s.name) this.name = s.name;
+    if (s.weaponId != null) this.weaponId = s.weaponId;
   }
 
   update(dt) {
@@ -1336,6 +1432,8 @@ export class RemotePlayer {
     ctx.beginPath();
     ctx.arc(0, 0, this.r, 0, Math.PI * 2);
     ctx.fill();
+
+    if (this.weaponId) drawHeldWeapon(ctx, this.weaponId);
 
     ctx.restore();
 

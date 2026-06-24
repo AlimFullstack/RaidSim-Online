@@ -4,4 +4,4 @@
 
 ## Играть
 
-**[alimfrontend.github.io/RaidSim-Online](https://alimfrontend.github.io/RaidSim-Online/)**
+**[alimfullstack.github.io/RaidSim-Online](https://alimfullstack.github.io/RaidSim-Online/)**

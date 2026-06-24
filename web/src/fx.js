@@ -172,6 +172,8 @@ export class Confetti {
 }
 
 /** In-world and screen-space combat / interaction feedback */
+const MAX_PARTICLES = 180;
+
 export class GameFx {
   constructor() {
     this.particles = [];
@@ -191,6 +193,7 @@ export class GameFx {
     this.camShakeY = 0;
     this.camShakePhase = 0;
     this._fogCanvas = null;
+    this._fogCache = null;
   }
 
   clear() {
@@ -255,15 +258,16 @@ export class GameFx {
   }
 
   kickCamera(strength, angle) {
-    const kick = strength * 0.62;
+    const shootShake = 0.5;
+    const kick = strength * 0.42 * shootShake;
     this.camKickX += Math.cos(angle + Math.PI) * kick;
     this.camKickY += Math.sin(angle + Math.PI) * kick;
-    this.fovKick = Math.max(this.fovKick, strength * 0.014);
-    this.addShake(strength * 0.42);
+    this.fovKick = Math.max(this.fovKick, strength * 0.01 * shootShake);
+    this.addShake(strength * 0.28 * shootShake);
   }
 
   addShake(amount = 4) {
-    this.camShakeAmp = Math.min(16, this.camShakeAmp + amount);
+    this.camShakeAmp = Math.min(11, this.camShakeAmp + amount);
   }
 
   getCameraOffset() {
@@ -346,7 +350,7 @@ export class GameFx {
     this.screenFlash = Math.min(0.5, this.screenFlash + 0.14);
     this.screenFlashColor = `rgba(220, 40, 40, ${0.28 + amount / 70})`;
     this.vignette = Math.min(0.55, this.vignette + 0.18);
-    this.addShake(2.5 + amount * 0.22);
+    this.addShake(1.6 + amount * 0.14);
     this.fovKick = Math.max(this.fovKick, 0.022 + amount * 0.0008);
   }
 
@@ -365,6 +369,31 @@ export class GameFx {
       size: 2,
       color: 'rgba(180, 160, 120, 0.4)',
     });
+  }
+
+  /** Пыль при беге игрока — частицы позади по направлению движения */
+  sprintDust(x, y, angle) {
+    for (let i = 0; i < 3; i++) {
+      const side = (Math.random() - 0.5) * 16;
+      const back = 8 + Math.random() * 8;
+      const px = x - Math.cos(angle) * back + Math.cos(angle + Math.PI / 2) * side;
+      const py = y - Math.sin(angle) * back + Math.sin(angle + Math.PI / 2) * side;
+      const life = 0.3 + Math.random() * 0.2;
+      const r = 150 + (Math.random() * 35) | 0;
+      const g = 125 + (Math.random() * 25) | 0;
+      const b = 85 + (Math.random() * 20) | 0;
+      this.particles.push({
+        x: px,
+        y: py + 5,
+        vx: -Math.cos(angle) * (18 + Math.random() * 28) + (Math.random() - 0.5) * 16,
+        vy: -Math.sin(angle) * (18 + Math.random() * 28) + (Math.random() - 0.5) * 10,
+        life,
+        maxLife: life,
+        size: 2 + Math.random() * 2.5,
+        color: `rgba(${r}, ${g}, ${b}, ${0.35 + Math.random() * 0.3})`,
+        dust: true,
+      });
+    }
   }
 
   chargeStreak(x, y, angle, boss = false) {
@@ -401,11 +430,18 @@ export class GameFx {
         p.vx *= 0.98;
         p.vy *= 0.98;
         p.size += dt * 8;
+      } else if (p.dust) {
+        p.vx *= 0.9;
+        p.vy *= 0.9;
+        p.size += dt * 5;
       } else {
         p.vy += 120 * dt;
       }
       return p.life > 0;
     });
+    if (this.particles.length > MAX_PARTICLES) {
+      this.particles.splice(0, this.particles.length - MAX_PARTICLES);
+    }
 
     this.floats = this.floats.filter((f) => {
       f.life -= dt;
@@ -539,8 +575,20 @@ export class GameFx {
 
     const px = p.x - camX + pad;
     const py = p.y - camY + pad;
-    const visionPts = computeVisionPolygon(p.x, p.y, p.angle, game.activeMap.walls, theme);
-    const localPts = visionPts.map((pt) => ({ x: pt.x - camX + pad, y: pt.y - camY + pad }));
+    const cacheKey = `${Math.round(p.x)}|${Math.round(p.y)}|${p.angle.toFixed(2)}|${fw}|${fh}`;
+    const now = performance.now();
+    let localPts;
+    if (
+      this._fogCache
+      && this._fogCache.key === cacheKey
+      && now - this._fogCache.at < 50
+    ) {
+      localPts = this._fogCache.localPts;
+    } else {
+      const visionPts = computeVisionPolygon(p.x, p.y, p.angle, game.activeMap.walls, theme);
+      localPts = visionPts.map((pt) => ({ x: pt.x - camX + pad, y: pt.y - camY + pad }));
+      this._fogCache = { key: cacheKey, at: now, localPts };
+    }
 
     fctx.globalCompositeOperation = 'destination-out';
     punchSoftVisionHole(fctx, localPts, px, py, 50);

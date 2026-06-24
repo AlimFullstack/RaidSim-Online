@@ -43,14 +43,14 @@ export function createBetaTestLoadout() {
   return normalizeLoadout({
     equipped: {
       weapon: { id: 'beta_ak', name: 'АК-74', weapon: 'ak', value: 20 },
-      armor: { id: 'beta_armor', name: 'Бронежилет', armor: 25, value: 8 },
+      armor: { id: 'beta_armor', name: 'Бронежилет', armor: 50, value: 8 },
     },
     hotbar: [
-      { id: 'beta_med1', name: 'Бинт', heal: 50, consumable: true, value: 0 },
-      { id: 'beta_med2', name: 'Бинт', heal: 50, consumable: true, value: 0 },
-      { id: 'beta_med3', name: 'Бинт', heal: 50, consumable: true, value: 0 },
+      { id: 'beta_med1', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 },
+      { id: 'beta_med2', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 },
+      { id: 'beta_med3', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 },
     ],
-    backpack: [{ id: 'beta_ammo', name: 'Патроны', ammo: 18, value: 0, count: 1 }],
+    backpack: [{ id: 'beta_ammo', name: 'Патроны', ammo: 36, value: 0, count: 1 }],
   });
 }
 
@@ -68,9 +68,11 @@ export const SHOP_ITEMS = [
   { id: 'pp', name: 'ПП-91', cost: 240, item: { id: 'pp', name: 'ПП-91', weapon: 'pp', value: 28 } },
   { id: 'shotgun', name: 'Дробовик', cost: 180, item: { id: 'shotgun', name: 'Дробовик', weapon: 'shotgun', value: 12 } },
   { id: 'ak', name: 'АК-74', cost: 350, item: { id: 'ak', name: 'АК-74', weapon: 'ak', value: 20 } },
-  { id: 'ammo', name: 'Патроны +18', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 18, value: 0 } },
-  { id: 'medkit', name: 'Аптечка', cost: 50, item: { id: 'medkit', name: 'Аптечка', heal: 50, consumable: true, value: 0 } },
-  { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 25, value: 8 } },
+  { id: 'sniper', name: 'СВД', cost: 500, item: { id: 'sniper', name: 'СВД', weapon: 'sniper', value: 50 } },
+  { id: 'ammo', name: 'Патроны +36', cost: 30, item: { id: 'ammo', name: 'Патроны', ammo: 36, value: 0 } },
+  { id: 'bandage', name: 'Бинт', cost: 20, item: { id: 'bandage', name: 'Бинт', heal: 20, healDuration: 1, consumable: true, value: 0 } },
+  { id: 'medkit', name: 'Аптечка', cost: 75, item: { id: 'medkit', name: 'Аптечка', heal: 75, healDuration: 3, consumable: true, value: 0 } },
+  { id: 'armor', name: 'Бронежилет', cost: 100, item: { id: 'armor', name: 'Бронежилет', armor: 50, value: 8 } },
 ];
 
 export function xpToLevel(xp) {

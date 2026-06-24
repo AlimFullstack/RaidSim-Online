@@ -10,6 +10,7 @@ import {
   lobbyEquipToStash,
   swapLoadoutSlots,
   normalizeLoadout,
+  ensureMigratedProfile,
 } from './inventory-core.js';
 import { itemIcon } from './inventory-ui.js';
 
@@ -143,7 +144,13 @@ export function setupLobbyDrag(lobby) {
       return;
     }
     if (r.profile) lobby.profile = r.profile;
-    await lobby.persistProfile(null);
+    const saved = await lobby.persistProfile(null);
+    if (!saved.ok) {
+      lobby.profile = ensureMigratedProfile(await lobby.storage.load());
+      lobby.flash(saved.msg || 'Ошибка сохранения — изменения отменены');
+      lobby.render();
+      return;
+    }
     lobby.onProfileChanged(r.msg);
   });
 }

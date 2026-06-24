@@ -23,7 +23,7 @@ import { setupLobbyDrag, renderInvSlotContent } from './lobby-drag.js';
 import { Matchmaking } from './matchmaking.js';
 import { getFirestoreDb } from './auth.js';
 
-const SHOP_ICONS = { pm: '🔫', pp: '🔫', medkit: '💊', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫' };
+const SHOP_ICONS = { pm: '🔫', pp: '🔫', medkit: '💊', bandage: '🩹', ammo: '🔋', armor: '🛡', shotgun: '🔫', ak: '🔫', sniper: '🎯' };
 const MODE_ICONS = { standard: '⏱', quick: '⚡', boss: '💀', betatest: '🧪' };
 
 export class Lobby {
@@ -326,7 +326,10 @@ export class Lobby {
       const w = getWeapon(item.item.weapon);
       return `В схрон · урон ${w.damage} · маг. ${w.magSize}`;
     }
-    if (item.item?.heal) return 'В схрон · аптечка';
+    if (item.item?.heal) {
+      const dur = item.item.healDuration || 1;
+      return `В схрон · +${item.item.heal} HP за ${dur} сек`;
+    }
     if (item.item?.ammo) return `В схрон · +${item.item.ammo} патронов`;
     if (item.item?.armor) return `В схрон · броня +${item.item.armor}`;
     return 'В схрон';

@@ -13,7 +13,7 @@ import { drawMinimap } from './minimap.js';
 import { GameFx } from './fx.js';
 import { getMuzzleOffset } from './weapons.js';
 import { getMapTheme } from './map-atmosphere.js';
-import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius, SPREAD_CONE_VISION_RATIO, AUTO_FIRE_MIN_ANGLE, AUTO_FIRE_DELAY_MIN, AUTO_FIRE_DELAY_MAX } from './visibility.js';
+import { canSeePoint, buildVisionTheme, isBlockedBySmoke, playerVisionRadius, npcVisionRadius, SPREAD_CONE_VISION_RATIO } from './visibility.js';
 import { alertNearbyScavs, findFreeSpawnNear } from './scav-ai.js';
 import { loadSettings, CONTROL_BINDINGS } from './settings.js';
 import { lootTotalValue } from './inventory-core.js';
@@ -71,13 +71,16 @@ export class Game {
     this.wasInExtract = false;
     this.scavAlerted = new Set();
     this.playerMoving = false;
+    this.sprintDustTimer = 0;
     this.groundItems = [];
     this.settings = loadSettings();
     this._hudCache = '';
     this.settingsOpen = false;
     this.inventoryUi = new RaidInventoryUI(this);
-    this.autoFireTrack = { target: null, since: 0, delay: 0.3, aimAngle: 0 };
     this.sandboxRaid = false;
+    this._frameVision = null;
+    this._visionFrameId = -1;
+    this._drawTick = 0;
   }
 
   async startRaid(mode = 'standard', loadout = {}, mapId = 'factory', mpOptions = null) {
@@ -121,7 +124,6 @@ export class Game {
     this.groundItems = [];
     this.playerCorpse = null;
     this.pmcCorpses = [];
-    this.autoFireTrack = { target: null, since: 0, delay: 0.3, aimAngle: 0 };
     this.noiseEvents = [];
     this.scavAlerted = new Set();
     this.wasInExtract = false;
@@ -135,6 +137,7 @@ export class Game {
     document.getElementById('auth-screen')?.classList.add('hidden');
     this._hudCache = '';
     this.inventoryUi?.toggle(false);
+    this.syncRaidCursor();
     this.resize();
 
     if (mpOptions?.matchId && mpOptions.uid) {
@@ -160,6 +163,32 @@ export class Game {
   applySettings(settings) {
     this.settings = settings;
     this.audio?.applySettings(settings);
+  }
+
+  centerMouseOnCanvas() {
+    const rect = this.canvas.getBoundingClientRect();
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    this.input.mouse.x = cx;
+    this.input.mouse.y = cy;
+    this.input.mouse.screenX = cx;
+    this.input.mouse.screenY = cy;
+    this.input.updateWorld(this.camX, this.camY, this.scale, this.canvas);
+  }
+
+  syncRaidCursor() {
+    if (this.state !== 'raid') {
+      this.canvas.classList.remove('raid-combat');
+      return;
+    }
+    const invOpen = this.inventoryUi?.open;
+    this.canvas.classList.toggle('raid-combat', !invOpen);
+  }
+
+  toggleInventory() {
+    this.inventoryUi.toggle();
+    if (this.inventoryUi.open) this.centerMouseOnCanvas();
+    this.syncRaidCursor();
   }
 
   toggleSettings() {
@@ -194,7 +223,7 @@ export class Game {
     }
 
     if (this.input.tapped('Tab') || this.input.tapped('KeyI')) {
-      this.inventoryUi.toggle();
+      this.toggleInventory();
     }
 
     const combat = !this.inventoryUi.open;
@@ -304,11 +333,10 @@ export class Game {
       const mapTheme = getMapTheme(this.activeMap?.theme);
       const pVisionR = playerVisionRadius(viewW, viewH, p.hp / p.maxHp, mapTheme);
       p.coneRange = pVisionR * SPREAD_CONE_VISION_RATIO;
-      const autoFireState = this.evaluateAutoFire(p, pVisionR);
 
+      const prevX = p.x;
+      const prevY = p.y;
       const shot = p.update(this.input, dt, combat, {
-        autoFire: autoFireState.active,
-        autoAimAngle: autoFireState.aimAngle,
         autoReload: true,
       });
       if (!reloadingBefore && p.reloadTime > 0 && !this.input.tapped('KeyR')) {
@@ -318,10 +346,16 @@ export class Game {
       if (this.wasReloading && p.reloadTime <= 0 && p.ammo > 0) this.audio?.play('reloadDone');
       this.wasReloading = p.reloadTime > 0;
 
-      const movedBefore = { x: p.x, y: p.y };
-      if (p.x !== movedBefore.x || p.y !== movedBefore.y) {
-        this.playerMoving = true;
-        if (p.isSprinting) this.fx.footDust(p.x, p.y);
+      const moved = Math.hypot(p.x - prevX, p.y - prevY) > 0.3;
+      this.playerMoving = moved;
+      if (moved && p.isSprinting) {
+        this.sprintDustTimer -= dt;
+        if (this.sprintDustTimer <= 0) {
+          this.fx.sprintDust(p.x, p.y, p.angle);
+          this.sprintDustTimer = 0.055;
+        }
+      } else {
+        this.sprintDustTimer = 0;
       }
       if (this.playerMoving) this.audio?.tickFootsteps(dt, p.isSprinting);
 
@@ -448,17 +482,26 @@ export class Game {
     this.input.endFrame();
   }
 
+  getFrameVisionTheme() {
+    if (this._visionFrameId !== this._drawTick) {
+      const p = this.player;
+      const viewW = this.canvas.width / this.scale;
+      const viewH = this.canvas.height / this.scale;
+      this._frameVision = buildVisionTheme(
+        getMapTheme(this.activeMap?.theme),
+        viewW,
+        viewH,
+        p ? p.hp / p.maxHp : 1
+      );
+      this._visionFrameId = this._drawTick;
+    }
+    return this._frameVision;
+  }
+
   canSee(wx, wy) {
     const p = this.player;
     if (!p || p.dead || !this.activeMap) return false;
-    const viewW = this.canvas.width / this.scale;
-    const viewH = this.canvas.height / this.scale;
-    const theme = buildVisionTheme(
-      getMapTheme(this.activeMap.theme),
-      viewW,
-      viewH,
-      p.hp / p.maxHp
-    );
+    const theme = this.getFrameVisionTheme();
     return canSeePoint(p.x, p.y, wx, wy, p.angle, this.activeMap.walls, theme)
       && !isBlockedBySmoke(p.x, p.y, wx, wy, this.smokeZones);
   }
@@ -474,79 +517,6 @@ export class Game {
       this.input.pressed('ArrowLeft') ||
       this.input.pressed('ArrowRight')
     );
-  }
-
-  evaluateAutoFire(p, visionRadius) {
-    if (this.isPlayerMovingInput() || p.reloadTime > 0) {
-      this.autoFireTrack.target = null;
-      return { active: false, aimAngle: null };
-    }
-
-    const target = this.findAutoFireTarget(p, visionRadius);
-    if (!target) {
-      this.autoFireTrack.target = null;
-      return { active: false, aimAngle: null };
-    }
-
-    const aimAngle = Math.atan2(target.y - p.y, target.x - p.x);
-    if (this.autoFireTrack.target !== target.ref) {
-      this.autoFireTrack.target = target.ref;
-      this.autoFireTrack.since = this.animTime;
-      this.autoFireTrack.delay =
-        AUTO_FIRE_DELAY_MIN + Math.random() * (AUTO_FIRE_DELAY_MAX - AUTO_FIRE_DELAY_MIN);
-    }
-
-    const ready = this.animTime - this.autoFireTrack.since >= this.autoFireTrack.delay;
-    return { active: ready, aimAngle };
-  }
-
-  /** Цель в конусе разброса: видимость, LOS, дистанция ≤ 90% радиуса обзора */
-  findAutoFireTarget(p, visionRadius) {
-    if (!p.canShoot() || p.dead || !this.activeMap) return null;
-
-    const coneRange = visionRadius * SPREAD_CONE_VISION_RATIO;
-    const spread = Math.max(p.getSpreadAngle(), AUTO_FIRE_MIN_ANGLE);
-    const walls = this.activeMap.walls;
-    const viewW = this.canvas.width / this.scale;
-    const viewH = this.canvas.height / this.scale;
-    const theme = buildVisionTheme(
-      getMapTheme(this.activeMap.theme),
-      viewW,
-      viewH,
-      p.hp / p.maxHp
-    );
-
-    const targets = [];
-    for (const scav of this.scavs) {
-      if (!scav.dead) targets.push({ x: scav.x, y: scav.y, ref: scav });
-    }
-    if (this.multiplayer) {
-      for (const rp of this.multiplayer.values()) {
-        if (!rp.dead) targets.push({ x: rp.x, y: rp.y, ref: rp });
-      }
-    }
-
-    let best = null;
-    let bestDist = Infinity;
-    for (const t of targets) {
-      const d = dist(p.x, p.y, t.x, t.y);
-      if (d > coneRange) continue;
-
-      const aim = Math.atan2(t.y - p.y, t.x - p.x);
-      let delta = aim - p.angle;
-      while (delta > Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-      if (Math.abs(delta) > spread) continue;
-
-      if (!canSeePoint(p.x, p.y, t.x, t.y, p.angle, walls, theme)) continue;
-      if (isBlockedBySmoke(p.x, p.y, t.x, t.y, this.smokeZones)) continue;
-
-      if (d < bestDist) {
-        best = t;
-        bestDist = d;
-      }
-    }
-    return best;
   }
 
   updateThrownGrenades(dt) {
@@ -799,8 +769,10 @@ export class Game {
               b.dead = true;
               this.fx.hitSparks(b.x, b.y);
               this.audio?.play('hit');
+              rp.hp = Math.max(0, rp.hp - b.damage);
               this.multiplayer.reportHit(rp.uid, b.damage);
-              if (rp.hp - b.damage <= 0) {
+              if (rp.hp <= 0) {
+                rp.dead = true;
                 p.kills += 1;
                 this.audio?.play('kill');
                 this.fx.bloodBurst(rp.x, rp.y);
@@ -835,6 +807,7 @@ export class Game {
   endRaid(type, title, desc, survived = false) {
     this.state = 'ended';
     this.inventoryUi?.toggle(false);
+    this.canvas.classList.remove('raid-combat');
     const p = this.player;
     const loot = survived ? p.getCarriedLoot() : [];
     const lootValue = lootTotalValue(loot);
@@ -922,6 +895,7 @@ export class Game {
   }
 
   draw() {
+    this._drawTick += 1;
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0d0f0c';
@@ -953,7 +927,12 @@ export class Game {
     for (const gi of this.groundItems) {
       if (this.canSee(gi.x, gi.y)) gi.draw(ctx);
     }
+    const visionTheme = this.player && !this.player.dead ? this.getFrameVisionTheme() : null;
+    const visionR = visionTheme?.visionRadius || 500;
+    const px = this.player?.x ?? 0;
+    const py = this.player?.y ?? 0;
     for (const b of this.bullets) {
+      if (dist(px, py, b.x, b.y) > visionR * 1.2) continue;
       if (this.canSee(b.x, b.y)) b.draw(ctx);
     }
     this.fx.drawWorld(ctx);
@@ -980,7 +959,15 @@ export class Game {
   }
 
   drawCrosshair(ctx) {
-    if (this.state !== 'raid' || this.settingsOpen || !this.player || this.player.dead) return;
+    if (
+      this.state !== 'raid' ||
+      this.settingsOpen ||
+      this.inventoryUi?.open ||
+      !this.player ||
+      this.player.dead
+    ) {
+      return;
+    }
     const mx = this.input.mouse.screenX ?? this.input.mouse.x;
     const my = this.input.mouse.screenY ?? this.input.mouse.y;
     ctx.strokeStyle = 'rgba(200, 220, 180, 0.95)';
@@ -1085,6 +1072,8 @@ export function createUI() {
       document.getElementById('hp-text').textContent = Math.ceil(p.hp);
       document.getElementById('hp-bar').style.width = `${(p.hp / p.maxHp) * 100}%`;
       document.getElementById('extract-bar').style.width = `${(p.extractProgress / EXTRACT_TIME) * 100}%`;
+      const staminaEl = document.getElementById('stamina-bar');
+      if (staminaEl) staminaEl.style.width = `${(p.stamina ?? 1) * 100}%`;
       document.getElementById('ammo').textContent = p.canShoot() ? `${p.ammo} / ${p.reserve}` : '—';
       document.getElementById('weapon-name').textContent = p.canShoot() ? p.weaponName || '—' : '—';
       const weaponHint = document.getElementById('weapon-hint');
@@ -1102,12 +1091,14 @@ export function createUI() {
       if (weaponHint) {
         if (reloading) {
           weaponHint.textContent = `Перезарядка… ${Math.ceil((1 - p.reloadTime / p.reloadDuration) * 100)}%`;
+        } else if (p.canShoot() && p.weaponId === 'sniper') {
+          weaponHint.textContent = 'Стоя · зажми ЛКМ';
         } else if (p.canShoot() && p.weaponId === 'pm') {
-          weaponHint.textContent = 'Полуавто · клик';
+          weaponHint.textContent = 'Зажми ЛКМ';
         } else if (p.canShoot() && p.semiAuto) {
-          weaponHint.textContent = 'Полуавто · клик';
+          weaponHint.textContent = 'Зажми ЛКМ';
         } else if (p.canShoot()) {
-          weaponHint.textContent = 'Авто · R перезарядка';
+          weaponHint.textContent = 'Авто · зажми ЛКМ';
         } else {
           weaponHint.textContent = 'Нет оружия · Tab — надень из рюкзака';
         }

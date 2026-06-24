@@ -20,7 +20,9 @@
 Добавь (если нет):
 
 - `localhost`
-- `alimfrontend.github.io`
+- `alimfullstack.github.io`
+
+> После смены ника GitHub (`AlimFullstack`) Pages живёт на **alimfullstack.github.io**. Старый `alimfrontend.github.io` может редиректить, но для Google-входа добавь именно новый домен.
 
 ### 3. Firestore Database → Create database
 

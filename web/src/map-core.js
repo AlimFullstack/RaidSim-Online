@@ -44,8 +44,8 @@ export const LOOT_TABLE = {
   normal: [
     { id: 'empty', name: 'Пусто', weight: 2, value: 0 },
     { id: 'coin', name: 'Монета', weight: 3, value: 1 },
-    { id: 'ammo', name: 'Патроны', weight: 3, value: 0, ammo: 18 },
-    { id: 'bandage', name: 'Бинт', weight: 2, value: 0, heal: 25 },
+    { id: 'ammo', name: 'Патроны', weight: 7, value: 0, ammo: 18 },
+    { id: 'bandage', name: 'Бинт', weight: 2, value: 0, heal: 20, healDuration: 1, consumable: true },
     { id: 'food', name: 'Еда', weight: 2, value: 1 },
     { id: 'bolt', name: 'Болт', weight: 2, value: 2 },
     { id: 'chain', name: 'Цепь', weight: 1, value: 5 },
@@ -53,11 +53,12 @@ export const LOOT_TABLE = {
     { id: 'smoke', name: 'Дымовая', weight: 1, value: 6, consumable: true, smoke: true },
   ],
   valuable: [
-    { id: 'ammo2', name: 'Патроны x2', weight: 2, value: 0, ammo: 36 },
-    { id: 'medkit', name: 'Аптечка', weight: 3, value: 0, heal: 50, consumable: true },
-    { id: 'armor', name: 'Бронежилет', weight: 2, value: 8, armor: 25 },
+    { id: 'ammo2', name: 'Патроны x2', weight: 5, value: 0, ammo: 36 },
+    { id: 'medkit', name: 'Аптечка', weight: 3, value: 0, heal: 75, healDuration: 3, consumable: true },
+    { id: 'armor', name: 'Бронежилет', weight: 2, value: 8, armor: 50 },
     { id: 'shotgun', name: 'Дробовик', weight: 2, value: 12, weapon: 'shotgun' },
     { id: 'ak', name: 'АК-74', weight: 1, value: 20, weapon: 'ak' },
+    { id: 'sniper', name: 'СВД', weight: 1, value: 50, weapon: 'sniper' },
     { id: 'pp', name: 'ПП-91', weight: 2, value: 28, weapon: 'pp' },
     { id: 'chain', name: 'Золотая цепь', weight: 2, value: 10 },
     { id: 'gpu', name: 'Видеокарта', weight: 1, value: 15 },
@@ -113,10 +114,22 @@ export function generateScavLoot() {
     let item = rollLoot('normal');
     let attempts = 0;
     while (item.id === 'empty' && attempts < 5) {
-      item = rollLoot('normal');
+      if (attempts === 2) {
+        item = { ...LOOT_TABLE.normal.find((e) => e.id === 'ammo'), uid: `ammo-${Date.now()}-${Math.random()}` };
+      } else {
+        item = rollLoot('normal');
+      }
       attempts++;
     }
     if (item.id !== 'empty') items.push(item);
+  }
+  if (Math.random() < 0.4) {
+    const bonus = rollLoot(Math.random() < 0.25 ? 'valuable' : 'normal');
+    if (bonus.id === 'ammo' || bonus.id === 'ammo2') {
+      items.push(bonus);
+    } else if (bonus.id !== 'empty' && Math.random() < 0.5) {
+      items.push({ ...LOOT_TABLE.normal.find((e) => e.id === 'ammo'), uid: `ammo-bonus-${Date.now()}` });
+    }
   }
   if (items.length === 0) {
     items.push({ id: 'coin', name: 'Монета', weight: 1, value: 1, uid: `coin-${Date.now()}` });

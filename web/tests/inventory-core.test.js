@@ -11,6 +11,9 @@ import {
   stackItems,
   swapLoadoutSlots,
   migrateProfile,
+  ensureMigratedProfile,
+  loadoutForSave,
+  loadoutHasWeapon,
   emptyBackpack,
   emptyHotbar,
   emptyLoadout,
@@ -121,6 +124,34 @@ describe('inventory-core', () => {
     expect(p.loadout.backpack.filter(Boolean).length + p.loadout.hotbar.filter(Boolean).length).toBeGreaterThan(0);
     expect(p.stash.items.find((i) => i.id === 'coin')).toBeTruthy();
     expect(p.loadout.weapon).toBeUndefined();
+  });
+
+  it('stale loadout.weapon does not duplicate weapon already in stash', () => {
+    const ak = { id: 'ak', name: 'АК-74', weapon: 'ak', value: 20, count: 1 };
+    const profile = {
+      stash: { items: [ak] },
+      loadout: {
+        hotbar: emptyHotbar(),
+        backpack: emptyBackpack(),
+        equipped: { weapon: null, armor: null },
+        weapon: 'ak',
+      },
+    };
+    const p = ensureMigratedProfile(profile);
+    expect(loadoutHasWeapon(p.loadout)).toBe(false);
+    expect(p.stash.items.filter((i) => i.weapon === 'ak')).toHaveLength(1);
+    expect(p.loadout.weapon).toBeUndefined();
+  });
+
+  it('loadoutForSave strips legacy weapon field', () => {
+    const saved = loadoutForSave({
+      hotbar: emptyHotbar(),
+      backpack: emptyBackpack(),
+      equipped: { weapon: null, armor: null },
+      weapon: 'ak',
+    });
+    expect(saved.weapon).toBeUndefined();
+    expect(saved.hotbar).toHaveLength(HOTBAR_SIZE);
   });
 
   it('normalizeLoadout upgrades old 4-slot backpack', () => {

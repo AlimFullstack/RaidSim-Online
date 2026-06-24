@@ -34,8 +34,8 @@ describe('profile extract and sell', () => {
   it('createBetaTestLoadout has ak, armor, ammo and bandages', () => {
     const ld = createBetaTestLoadout();
     expect(ld.equipped.weapon?.weapon).toBe('ak');
-    expect(ld.equipped.armor?.armor).toBe(25);
-    expect(ld.backpack.filter(Boolean)).toHaveLength(1);
+    expect(ld.equipped.armor?.armor).toBe(50);
+    expect(ld.backpack[0]?.ammo).toBe(36);
     expect(ld.hotbar.filter(Boolean)).toHaveLength(3);
     expect(loadoutHasWeapon(ld)).toBe(true);
   });
@@ -68,7 +68,7 @@ describe('profile extract and sell', () => {
 
   it('sellStashItem rejects zero-value consumables', () => {
     const profile = createDefaultProfile({
-      stash: { items: [{ id: 'medkit', name: 'Аптечка', heal: 50, value: 0, count: 2 }] },
+      stash: { items: [{ id: 'medkit', name: 'Аптечка', heal: 75, healDuration: 3, value: 0, count: 2 }] },
       quests: { active: null, completed: [] },
     });
     const r = sellStashItem(profile, 0);

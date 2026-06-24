@@ -10,7 +10,7 @@ import {
 import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 import { firebaseConfig, isFirebaseConfigured } from './firebase-config.js';
 import { createDefaultProfile, ensureMigratedProfile } from './profile.js';
-import { normalizeLoadout } from './inventory-core.js';
+import { cloneItem, loadoutForSave, stackItems } from './inventory-core.js';
 import { normalizeQuestRef } from './quests.js';
 
 let app = null;
@@ -54,16 +54,16 @@ function stripUndefined(obj) {
 
 /** Prepare profile for Firestore — no client-only fields, no functions. */
 export function serializeProfile(profile) {
-  const { isGuest, ...rest } = profile;
-  const data = stripUndefined({
+  const { isGuest, loadout, stash, ...rest } = profile;
+  return stripUndefined({
     ...rest,
     quests: {
       completed: profile.quests?.completed || [],
       active: normalizeQuestRef(profile.quests?.active),
     },
-    loadout: normalizeLoadout(profile.loadout || {}),
+    stash: { items: stackItems((stash?.items || []).map(cloneItem)) },
+    loadout: loadoutForSave(loadout),
   });
-  return data;
 }
 
 function hydrateProfile(data, user) {
@@ -229,7 +229,7 @@ export class ProfileStorage {
     });
 
     try {
-      await setDoc(ref, payload, { merge: true });
+      await setDoc(ref, payload);
       return { ok: true };
     } catch (e) {
       console.error('Firestore save error:', e);
